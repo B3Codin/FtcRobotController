@@ -3,7 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
-
+// poopy butt
 /** Robot-relative mecanum drive: left stick translates, right stick turns. */
 @TeleOp(name = "emily")
 public class emily extends LinearOpMode {
