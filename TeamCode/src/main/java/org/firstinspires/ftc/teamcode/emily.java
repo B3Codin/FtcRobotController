@@ -10,9 +10,14 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 // poopy butt
-/** Robot-relative mecanum drive: left stick translates, right stick turns. */
+/** Field-relative mecanum drive: left stick moves relative to the field, right stick turns. */
 @TeleOp(name = "emily")
 public class emily extends LinearOpMode {
+    // Adjust this if the robot starts pointed at a different angle than the driver's
+    // field-forward direction. Positive values rotate the field reference counterclockwise.
+    // For example, use 90 if the robot starts facing 90 degrees counterclockwise from field-forward.
+    private static final double HEADING_OFFSET_DEGREES = 0.0;
+
     private DcMotor FLeft;
     private DcMotor FRight;
     private DcMotor BLeft;
@@ -46,40 +51,53 @@ public class emily extends LinearOpMode {
         // Configure the sensor
         configurePinpoint();
 
-        // Set the location of the robot - this should be the place you are starting the robot from
+        // Set the initial position. Pinpoint's heading is zeroed by resetPosAndIMU().
         odo.setPosition(new Pose2D(DistanceUnit.CM, 0, 0,AngleUnit.DEGREES, 0));
 
-        telemetry.addLine("Ready: left stick moves, right stick turns (robot-relative).");
+        telemetry.addLine("Ready: left stick moves field-relative, right stick turns.");
+        telemetry.addData("Heading offset (degrees)", HEADING_OFFSET_DEGREES);
         telemetry.update();
         waitForStart();
 
-            while (opModeIsActive()) {
-                // FTC stick Y is negative when pushed forward.
-                drive(-gamepad1.left_stick_y, gamepad1.left_stick_x,
-                        gamepad1.right_stick_x);
+        while (opModeIsActive()) {
+            odo.update();
+            Pose2D pose2D = odo.getPosition();
+            double heading = pose2D.getHeading(AngleUnit.RADIANS)
+                    + Math.toRadians(HEADING_OFFSET_DEGREES);
 
-                telemetry.addLine("Press A to reset the position");
-                if(gamepad1.a){
-                    // You could use readings from April Tags here to give a new known position to the pinpoint
-                    odo.setPosition(new Pose2D(DistanceUnit.CM, 0, 0, AngleUnit.DEGREES, 0));
-                }
-                odo.update();
-                Pose2D pose2D = odo.getPosition();
+            // FTC stick Y is negative when pushed forward.
+            double fieldForward = -gamepad1.left_stick_y;
+            double fieldRight = gamepad1.left_stick_x;
 
-                telemetry.addData("X coordinate (CM)", pose2D.getX(DistanceUnit.CM));
-                telemetry.addData("Y coordinate (CM)", pose2D.getY(DistanceUnit.CM));
-                telemetry.addData("Heading angle (DEGREES)", pose2D.getHeading(AngleUnit.DEGREES));
+            // Convert the driver's field-relative command into robot-relative motion.
+            // Pinpoint heading is counterclockwise-positive; at +90 degrees, field-forward
+            // becomes robot-right.
+            double robotForward = fieldForward * Math.cos(heading)
+                    - fieldRight * Math.sin(heading);
+            double robotRight = fieldForward * Math.sin(heading)
+                    + fieldRight * Math.cos(heading);
+            drive(robotForward, robotRight, gamepad1.right_stick_x);
 
-
-                telemetry.update();
-                idle();
+            telemetry.addLine("Press A to reset the position");
+            if (gamepad1.a) {
+                // Reset X/Y while preserving heading so field-centric driving stays aligned.
+                odo.setPosition(new Pose2D(DistanceUnit.CM, 0, 0,
+                        AngleUnit.RADIANS, pose2D.getHeading(AngleUnit.RADIANS)));
             }
 
+            telemetry.addData("X coordinate (MM)", pose2D.getX(DistanceUnit.MM));
+            telemetry.addData("Y coordinate (MM)", pose2D.getY(DistanceUnit.MM));
+            telemetry.addData("Heading angle (DEGREES)", pose2D.getHeading(AngleUnit.DEGREES));
+            telemetry.addData("Field heading used (DEGREES)", Math.toDegrees(heading));
+
+            telemetry.update();
+            idle();
+        }
     }
 
     private void configurePinpoint() {
 
-        odo.setOffsets(0, -130, DistanceUnit.MM);
+        odo.setOffsets(0.4161412697138749, -2.594972445270208, DistanceUnit.INCH);
         odo.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
         odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.REVERSED,
                 GoBildaPinpointDriver.EncoderDirection.FORWARD);
