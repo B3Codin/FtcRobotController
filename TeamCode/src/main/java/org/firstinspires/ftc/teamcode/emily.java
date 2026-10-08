@@ -79,7 +79,7 @@ public class emily extends LinearOpMode {
 
     private void configurePinpoint() {
 
-        odo.setOffsets(0.2828, -1.8048, DistanceUnit.MM);
+        odo.setOffsets(0, -130, DistanceUnit.MM);
         odo.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
         odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.REVERSED,
                 GoBildaPinpointDriver.EncoderDirection.FORWARD);
