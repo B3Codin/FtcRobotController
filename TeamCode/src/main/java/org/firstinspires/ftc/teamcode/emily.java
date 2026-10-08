@@ -31,7 +31,7 @@ public class emily extends LinearOpMode {
         FLeft.setDirection(DcMotor.Direction.FORWARD);
         BLeft.setDirection(DcMotor.Direction.FORWARD);
         FRight.setDirection(DcMotor.Direction.REVERSE);
-        BRight.setDirection(DcMotor.Direction.FORWARD);
+        BRight.setDirection(DcMotor.Direction.REVERSE);
 
         for (DcMotor motor : new DcMotor[] {FLeft, FRight, BLeft, BRight}) {
             motor.setPower(0.0);
