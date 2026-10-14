@@ -89,6 +89,7 @@ public class emily extends LinearOpMode {
             telemetry.addData("Y coordinate (MM)", pose2D.getY(DistanceUnit.MM));
             telemetry.addData("Heading angle (DEGREES)", pose2D.getHeading(AngleUnit.DEGREES));
             telemetry.addData("Field heading used (DEGREES)", Math.toDegrees(heading));
+            telemetry.addLine("Zin is a loser");
 
             telemetry.update();
             idle();
