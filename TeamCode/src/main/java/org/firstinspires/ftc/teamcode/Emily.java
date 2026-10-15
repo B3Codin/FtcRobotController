@@ -4,15 +4,15 @@ import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
-// poopy butt
+
 /** Field-relative mecanum drive: left stick moves relative to the field, right stick turns. */
-@TeleOp(name = "emily")
-public class emily extends LinearOpMode {
+
+@TeleOp(name = "Emily")
+public class Emily extends LinearOpMode {
     // Adjust this if the robot starts pointed at a different angle than the driver's
     // field-forward direction. Positive values rotate the field reference counterclockwise.
     // For example, use 90 if the robot starts facing 90 degrees counterclockwise from field-forward.
@@ -89,7 +89,6 @@ public class emily extends LinearOpMode {
             telemetry.addData("Y coordinate (MM)", pose2D.getY(DistanceUnit.MM));
             telemetry.addData("Heading angle (DEGREES)", pose2D.getHeading(AngleUnit.DEGREES));
             telemetry.addData("Field heading used (DEGREES)", Math.toDegrees(heading));
-            telemetry.addLine("Zin is a loser");
 
             telemetry.update();
             idle();

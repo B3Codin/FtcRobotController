@@ -9,7 +9,6 @@ import com.pedropathing.paths.Path;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.ivy.Scheduler;
 import static com.pedropathing.ivy.Scheduler.schedule;
-import static com.pedropathing.ivy.commands.Commands.*;
 import static com.pedropathing.ivy.groups.Groups.sequential;
 import static com.pedropathing.ivy.pedro.PedroCommands.follow;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
@@ -17,8 +16,8 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
-@Autonomous(name = "Test", group = "Autonomous")
-public class Test extends LinearOpMode {
+@Autonomous(name = "AutoPath", group = "Autonomous")
+public class AutoPath extends LinearOpMode {
 
     private Follower follower;
 
@@ -28,11 +27,14 @@ public class Test extends LinearOpMode {
     private final Pose path1 = poseFactory.of(133.2231, 117.5385, 180);
     private final Pose path1Control1 = poseFactory.of(84.8323, 34.1862, 0);
     private final Pose path1Control2 = poseFactory.of(45.7673, 125.6083, 0);
+    private final Pose point2 = poseFactory.of(39.7135, 11.9567, 0.6026);
+    private final Pose point2Control1 = poseFactory.of(131.305, 12.3917, 0);
 
     // Autonomous routine
     public Command autoRoutine() {
         return sequential(
-                follow(follower, path1())
+                follow(follower, path1()),
+                follow(follower, path2())
         );
     }
 
@@ -65,5 +67,9 @@ public class Test extends LinearOpMode {
 
     public Path path1() {
         return curve(start, path1Control1, path1Control2, path1).linear(start, path1);
+    }
+
+    public Path path2() {
+        return curve(path1, point2Control1, point2).reverseTangent();
     }
 }
