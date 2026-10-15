@@ -9,6 +9,7 @@ import com.pedropathing.paths.Path;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.ivy.Scheduler;
 import static com.pedropathing.ivy.Scheduler.schedule;
+import static com.pedropathing.ivy.commands.Commands.*;
 import static com.pedropathing.ivy.groups.Groups.sequential;
 import static com.pedropathing.ivy.pedro.PedroCommands.follow;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
@@ -27,8 +28,9 @@ public class AutoPath extends LinearOpMode {
     private final Pose path1 = poseFactory.of(133.2231, 117.5385, 180);
     private final Pose path1Control1 = poseFactory.of(84.8323, 34.1862, 0);
     private final Pose path1Control2 = poseFactory.of(45.7673, 125.6083, 0);
-    private final Pose point2 = poseFactory.of(39.7135, 11.9567, 0.6026);
-    private final Pose point2Control1 = poseFactory.of(131.305, 12.3917, 0);
+    private final Pose point2 = poseFactory.of(46.9815, 10.1396, 177.3459);
+    private final Pose point2Control1 = poseFactory.of(87.6966, 98.4727, 0);
+    private final Pose point2Control2 = poseFactory.of(133.7504, 5.2022, 0);
 
     // Autonomous routine
     public Command autoRoutine() {
@@ -70,6 +72,6 @@ public class AutoPath extends LinearOpMode {
     }
 
     public Path path2() {
-        return curve(path1, point2Control1, point2).reverseTangent();
+        return curve(path1, point2Control1, point2Control2, point2).tangent();
     }
 }
