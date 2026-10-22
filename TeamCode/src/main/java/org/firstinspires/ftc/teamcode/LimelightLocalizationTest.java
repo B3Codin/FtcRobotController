@@ -51,9 +51,6 @@ public class LimelightLocalizationTest extends LinearOpMode {
             limelight.start();
             // Show measurements during INIT as well as after START.
             while (!isStopRequested()) {
-                telemetry.addLine("Stationary localization test; no motor commands.");
-                telemetry.addLine("Requires AprilTag pipeline 0, correct tag size, and Full 3D.");
-                telemetry.addLine("Camera-relative: X forward, Y left; heading about camera up.");
                 LLStatus status = limelight.getStatus();
                 if (status != null) {
                     telemetry.addData("Camera", status.getName());
@@ -100,7 +97,6 @@ public class LimelightLocalizationTest extends LinearOpMode {
                             telemetry.addLine("Detected tags do not belong to BIOBUZZ clusters (IDs 30-45).");
                         }
                         telemetry.addLine("Cluster identity only: offsets use its reference tag, not CELL opening.");
-                        telemetry.addLine("Cluster identity alone does not confirm the CELL is pointed up.");
                         telemetry.addLine("Camera pitch/roll must be accounted for before using ground distances.");
                     } else {
                         telemetry.addLine("No fresh AprilTag result from pipeline 0.");
