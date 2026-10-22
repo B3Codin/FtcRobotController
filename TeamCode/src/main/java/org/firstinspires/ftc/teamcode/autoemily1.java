@@ -17,20 +17,20 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
-@Autonomous(name = "AutoPath", group = "Autonomous")
-public class AutoPath extends LinearOpMode {
+@Autonomous(name = "autoemily1", group = "Autonomous")
+public class autoemily1 extends LinearOpMode {
 
     private Follower follower;
 
     private final PoseFactory poseFactory = PoseFactory.degrees();
 
-    private final Pose start = poseFactory.of(39.1926, 8.2271, 90);
-    private final Pose path1 = poseFactory.of(133.2231, 117.5385, 180);
-    private final Pose path1Control1 = poseFactory.of(84.8323, 34.1862, 0);
-    private final Pose path1Control2 = poseFactory.of(45.7673, 125.6083, 0);
-    private final Pose point2 = poseFactory.of(46.9815, 10.1396, 177.3459);
-    private final Pose point2Control1 = poseFactory.of(87.6966, 98.4727, 0);
-    private final Pose point2Control2 = poseFactory.of(133.7504, 5.2022, 0);
+    private final Pose start = poseFactory.of(56, 8, 90);
+    private final Pose path1 = poseFactory.of(70.7632, 115.4944, 180);
+    private final Pose path1Control1 = poseFactory.of(137.3082, 17.1429, 0);
+    private final Pose path1Control2 = poseFactory.of(134.6396, 109.1324, 0);
+    private final Pose point2 = poseFactory.of(56.508, 13.5907, -12.4825);
+    private final Pose point2Control1 = poseFactory.of(0.7865, 122.0433, 0);
+    private final Pose point2Control2 = poseFactory.of(1.0642, 24.89, 0);
 
     // Autonomous routine
     public Command autoRoutine() {
