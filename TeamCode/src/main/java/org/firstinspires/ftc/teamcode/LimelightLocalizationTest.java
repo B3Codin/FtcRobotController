@@ -18,6 +18,27 @@ public class LimelightLocalizationTest extends LinearOpMode {
     private static final int APRILTAG_PIPELINE = 0;
     private static final long MAX_STALENESS_MS = 100;
 
+    // BIOBUZZ manual section 9.9. A visible member identifies its entire cluster.
+    // Limelight returns member tags, not FTC AprilTagClusterDetection objects.
+    private enum Cluster {
+        RED_FAR("Red opposite audience", 30),
+        RED_AUDIENCE("Red audience", 34),
+        BLUE_AUDIENCE("Blue audience", 38),
+        BLUE_FAR("Blue opposite audience", 42);
+
+        final String label;
+        final int firstTagId;
+
+        Cluster(String label, int firstTagId) {
+            this.label = label;
+            this.firstTagId = firstTagId;
+        }
+
+        boolean contains(int tagId) {
+            return tagId >= firstTagId && tagId < firstTagId + 4;
+        }
+    }
+
     @Override
     public void runOpMode() throws InterruptedException {
         Limelight3A limelight = hardwareMap.get(Limelight3A.class, "limelight");
@@ -54,14 +75,32 @@ public class LimelightLocalizationTest extends LinearOpMode {
                             && result.getFiducialResults() != null
                             && !result.getFiducialResults().isEmpty();
                     if (usable) {
-                        StringBuilder ids = new StringBuilder();
-                        for (LLResultTypes.FiducialResult tag : result.getFiducialResults()) {
-                            if (ids.length() > 0) ids.append(", ");
-                            ids.append(tag.getFiducialId());
-                            reportCameraOffsets(tag);
+                        int clustersVisible = 0;
+                        for (Cluster cluster : Cluster.values()) {
+                            LLResultTypes.FiducialResult referenceTag = null;
+                            int visibleMembers = 0;
+                            for (LLResultTypes.FiducialResult tag : result.getFiducialResults()) {
+                                if (!cluster.contains(tag.getFiducialId())) continue;
+                                visibleMembers++;
+                                if (referenceTag == null
+                                        || tag.getTargetArea() > referenceTag.getTargetArea()) {
+                                    referenceTag = tag;
+                                }
+                            }
+                            if (referenceTag != null) {
+                                clustersVisible++;
+                                telemetry.addData(cluster.label + " cluster",
+                                        "%d/4 members visible; reference tag %d",
+                                        visibleMembers, referenceTag.getFiducialId());
+                                reportCameraOffsets(cluster.label, referenceTag);
+                            }
                         }
-                        telemetry.addData("Visible tag IDs", ids.toString());
-                        telemetry.addLine("Offsets are to individual tags, not the CELL opening or field origin.");
+                        telemetry.addData("Visible BIOBUZZ clusters", clustersVisible);
+                        if (clustersVisible == 0) {
+                            telemetry.addLine("Detected tags do not belong to BIOBUZZ clusters (IDs 30-45).");
+                        }
+                        telemetry.addLine("Cluster identity only: offsets use its reference tag, not CELL opening.");
+                        telemetry.addLine("Cluster identity alone does not confirm the CELL is pointed up.");
                         telemetry.addLine("Camera pitch/roll must be accounted for before using ground distances.");
                     } else {
                         telemetry.addLine("No fresh AprilTag result from pipeline 0.");
@@ -75,8 +114,8 @@ public class LimelightLocalizationTest extends LinearOpMode {
         }
     }
 
-    private void reportCameraOffsets(LLResultTypes.FiducialResult tag) {
-        String label = "Tag " + tag.getFiducialId();
+    private void reportCameraOffsets(String clusterLabel, LLResultTypes.FiducialResult tag) {
+        String label = clusterLabel + " reference";
         Pose3D pose = tag.getTargetPoseCameraSpace();
         if (pose == null) {
             telemetry.addData(label, "No camera-relative 3D pose");
