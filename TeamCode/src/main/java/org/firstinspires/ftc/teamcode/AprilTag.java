@@ -61,10 +61,13 @@ public class AprilTag extends LinearOpMode {
                                 Position position = robotPoseTargetSpace.getPosition().toUnit(DistanceUnit.METER);
                                 // Target-space X is lateral, Y is vertical, and Z is normal to the tag.
                                 double strafeDistance3D = position.x;
+                                double verticalDistance3D = position.y;
                                 double distance = Math.sqrt(position.x * position.x
                                         + position.y * position.y + position.z * position.z);
                                 telemetry.addData(label, "is %.3f meters away", distance);
-                                telemetry.addData(label + " tag-relative lateral offset (m)", "%.3f", strafeDistance3D);
+                                telemetry.addData(label + "cell-relative lateral offset (m)", "%.3f", strafeDistance3D);
+                                telemetry.addData(label + "cell-relative vertical offset (m)", "%.3f", verticalDistance3D);
+                                telemetry.addData(label + "AprilTag Area: ", fiducial.getTargetArea());
                             }
                         }
                     }
