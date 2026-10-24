@@ -14,7 +14,6 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
 import org.firstinspires.ftc.robotcore.external.navigation.Position;
 
 import java.util.List;
-
 @TeleOp (name = "AprilTag")
 public class AprilTag extends LinearOpMode {
     // Adjust so Pinpoint heading + this offset matches the Limelight field map's yaw.
@@ -23,11 +22,13 @@ public class AprilTag extends LinearOpMode {
     private static final double TARGET_DISTANCE_METERS = 3.0;
     private static final double DISTANCE_TOLERANCE_METERS = 0.05;
     private static final double TX_TOLERANCE_DEGREES = 1.0;
+    // Allow distance correction while steering; the final tx tolerance stays at 1 degree.
+    private static final double MAX_DRIVE_TX_DEGREES = 10.0;
     private static final double DRIVE_GAIN = 0.5;
     private static final double TURN_GAIN = 0.015;
     private static final double MAX_DRIVE_POWER = 0.30;
     private static final double MAX_TURN_POWER = 0.20;
-    private static final double MIN_DRIVE_POWER = 0.08;
+    private static final double MIN_DRIVE_POWER = 0.69;
     private static final double MIN_TURN_POWER = 0.06;
     private static final long MAX_RESULT_AGE_MS = 150;
     private static final long SETTLE_TIME_NS = 250_000_000L;
@@ -143,8 +144,6 @@ public class AprilTag extends LinearOpMode {
     private void updateAlignment(LLResult result, long nowNs) {
         boolean aPressed = gamepad1.a && !aWasPressed;
         aWasPressed = gamepad1.a;
-        // Default to stopped on every path, including missing/invalid camera data.
-        setDrivePower(0.0, 0.0);
         if (result != null && Double.isFinite(result.getTimestamp())
                 && result.getTimestamp() != lastCameraTimestamp) {
             lastCameraTimestamp = result.getTimestamp();
@@ -155,7 +154,10 @@ public class AprilTag extends LinearOpMode {
             stopAlignment("Cancelled. Press A to try again.");
             return;
         }
-        if (!aligning && !aPressed) return;
+        if (!aligning && !aPressed) {
+            setDrivePower(0.0, 0.0);
+            return;
+        }
 
         if (result == null || !result.isValid()
                 || result.getPipelineIndex() != APRILTAG_PIPELINE
@@ -212,6 +214,7 @@ public class AprilTag extends LinearOpMode {
         telemetry.addData("Distance error (m)", "%.3f", distanceError);
 
         if (txAligned && distanceAligned) {
+            setDrivePower(0.0, 0.0);
             if (inToleranceSinceNs == 0) inToleranceSinceNs = nowNs;
             alignmentStatus = "Settling within both tolerances.";
             if (nowNs - inToleranceSinceNs >= SETTLE_TIME_NS) {
@@ -220,18 +223,22 @@ public class AprilTag extends LinearOpMode {
             return;
         }
         inToleranceSinceNs = 0;
-        // Turn first; driving with a large bearing error could move away from the target.
+        // Correct small angle and distance errors together instead of repeatedly
+        // blocking translation whenever tx drifts just outside the final tolerance.
         double turn = txAligned ? 0.0
                 : proportionalPower(tx, TURN_GAIN, MIN_TURN_POWER, MAX_TURN_POWER);
-        double forward = txAligned && !distanceAligned
+        boolean canAdjustDistance = Math.abs(tx) <= MAX_DRIVE_TX_DEGREES;
+        double forward = canAdjustDistance && !distanceAligned
                 ? proportionalPower(distanceError, DRIVE_GAIN, MIN_DRIVE_POWER, MAX_DRIVE_POWER)
                 : 0.0;
         setDrivePower(forward, turn);
-        alignmentStatus = txAligned ? "Adjusting distance." : "Turning toward POI.";
+        alignmentStatus = forward != 0.0
+                ? "Adjusting distance and correcting tx." : "Turning toward POI.";
         telemetry.addData("Auto forward / turn", "%.2f / %.2f", forward, turn);
     }
 
     private void stopAlignment(String status) {
+        setDrivePower(0.0, 0.0);
         aligning = false;
         inToleranceSinceNs = 0;
         alignmentStatus = status;
