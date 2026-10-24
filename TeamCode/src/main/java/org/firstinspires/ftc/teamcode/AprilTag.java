@@ -25,7 +25,7 @@ public class AprilTag extends LinearOpMode {
     // Allow distance correction while steering; the final tx tolerance stays at 1 degree.
     private static final double MAX_DRIVE_TX_DEGREES = 10.0;
     private static final double DRIVE_GAIN = 0.5;
-    private static final double TURN_GAIN = 0.015;
+    private static final double TURN_GAIN = 0.005;
     private static final double MAX_DRIVE_POWER = 0.6;
     private static final double MAX_TURN_POWER = 0.5;
     private static final double MIN_DRIVE_POWER = 0.2;
