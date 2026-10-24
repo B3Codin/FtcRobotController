@@ -12,6 +12,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
 import org.firstinspires.ftc.robotcore.external.navigation.Position;
+import org.firstinspires.ftc.robotcore.external.navigation.UnnormalizedAngleUnit;
 
 import java.util.List;
 @TeleOp (name = "AprilTag")
@@ -25,7 +26,10 @@ public class AprilTag extends LinearOpMode {
     // Allow distance correction while steering; the final tx tolerance stays at 1 degree.
     private static final double MAX_DRIVE_TX_DEGREES = 10.0;
     private static final double DRIVE_GAIN = 0.5;
-    private static final double TURN_GAIN = 0.005;
+    private static final double TURN_GAIN = 0.00597;
+    // Power per degree/second of clockwise rotation; slows a turn before it overshoots.
+    private static final double TURN_DAMPING_GAIN = 0.002;
+    private static final double TURN_SLOWDOWN_DEGREES = 10.0;
     private static final double MAX_DRIVE_POWER = 0.6;
     private static final double MAX_TURN_POWER = 0.5;
     private static final double MIN_DRIVE_POWER = 0.2;
@@ -47,6 +51,7 @@ public class AprilTag extends LinearOpMode {
     private long inToleranceSinceNs;
     private double lastCameraTimestamp = Double.NaN;
     private long lastNewFrameNs;
+    private double clockwiseTurnRateDegrees;
     private String alignmentStatus = "Idle: press A to align; A or B cancels.";
 
     @Override
@@ -68,8 +73,11 @@ public class AprilTag extends LinearOpMode {
                 // The Pinpoint's built-in IMU supplies heading; refresh it each loop.
                 odo.update();
                 double headingDegrees = odo.getHeading(AngleUnit.DEGREES);
+                // Pinpoint reports counterclockwise-positive; drivetrain turn is clockwise-positive.
+                clockwiseTurnRateDegrees = -odo.getHeadingVelocity(UnnormalizedAngleUnit.DEGREES);
                 limelight.updateRobotOrientation(headingDegrees + FIELD_HEADING_OFFSET_DEGREES);
                 telemetry.addData("Pinpoint heading (deg)", headingDegrees);
+                telemetry.addData("Clockwise turn rate (deg/s)", clockwiseTurnRateDegrees);
 
                 LLResult result = limelight.getLatestResult();
                 updateAlignment(result, System.nanoTime());
@@ -158,6 +166,10 @@ public class AprilTag extends LinearOpMode {
             setDrivePower(0.0, 0.0);
             return;
         }
+        if (!Double.isFinite(clockwiseTurnRateDegrees)) {
+            stopAlignment("Stopped: invalid Pinpoint turn rate.");
+            return;
+        }
 
         if (result == null || !result.isValid()
                 || result.getPipelineIndex() != APRILTAG_PIPELINE
@@ -225,8 +237,7 @@ public class AprilTag extends LinearOpMode {
         inToleranceSinceNs = 0;
         // Correct small angle and distance errors together instead of repeatedly
         // blocking translation whenever tx drifts just outside the final tolerance.
-        double turn = txAligned ? 0.0
-                : proportionalPower(tx, TURN_GAIN, MIN_TURN_POWER, MAX_TURN_POWER);
+        double turn = calculateTurnPower(tx, clockwiseTurnRateDegrees);
         boolean canAdjustDistance = Math.abs(tx) <= MAX_DRIVE_TX_DEGREES;
         double forward = canAdjustDistance && !distanceAligned
                 ? proportionalPower(distanceError, DRIVE_GAIN, MIN_DRIVE_POWER, MAX_DRIVE_POWER)
@@ -247,6 +258,25 @@ public class AprilTag extends LinearOpMode {
     private static double proportionalPower(double error, double gain, double minimum, double maximum) {
         double magnitude = Range.clip(Math.abs(error) * gain, minimum, maximum);
         return Math.copySign(magnitude, error);
+    }
+
+    private static double calculateTurnPower(double tx, double clockwiseRateDegrees) {
+        double errorDegrees = Math.abs(tx);
+        if (errorDegrees <= TX_TOLERANCE_DEGREES) return 0.0;
+
+        // Keep the configured minimum for large turns, but taper it toward zero
+        // near the tolerance instead of kicking across the crosshair at 20% power.
+        double minimumScale = Range.clip(
+                (errorDegrees - TX_TOLERANCE_DEGREES)
+                        / (TURN_SLOWDOWN_DEGREES - TX_TOLERANCE_DEGREES), 0.0, 1.0);
+        double approachPower = Math.copySign(
+                Range.clip(Math.max(errorDegrees * TURN_GAIN, MIN_TURN_POWER * minimumScale),
+                        0.0, MAX_TURN_POWER), tx);
+        double dampedPower = approachPower - TURN_DAMPING_GAIN * clockwiseRateDegrees;
+        // Brake if already turning toward the target too quickly. Reverse only
+        // when the measured target error changes sign, not just from gyro damping.
+        if (dampedPower * tx <= 0.0) return 0.0;
+        return Range.clip(dampedPower, -MAX_TURN_POWER, MAX_TURN_POWER);
     }
 
     private void setDrivePower(double forward, double clockwiseTurn) {
