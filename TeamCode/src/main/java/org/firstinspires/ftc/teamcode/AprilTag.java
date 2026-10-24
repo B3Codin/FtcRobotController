@@ -195,10 +195,10 @@ public class AprilTag extends LinearOpMode {
             alignmentStartedNs = nowNs;
             inToleranceSinceNs = 0;
         }
-        if (tag.getFiducialId() != alignmentTagId) {
-            stopAlignment("Stopped: target tag changed. Press A to retry.");
-            return;
-        }
+//        if (tag.getFiducialId() != alignmentTagId) {
+//            stopAlignment("Stopped: target tag changed. Press A to retry.");
+//            return;
+//        }
         if (nowNs - alignmentStartedNs >= ALIGNMENT_TIMEOUT_NS) {
             stopAlignment("Stopped: alignment timed out. Press A to retry.");
             return;
