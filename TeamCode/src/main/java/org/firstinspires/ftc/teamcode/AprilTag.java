@@ -169,7 +169,7 @@ public class AprilTag extends LinearOpMode {
         List<FiducialResult> fiducials = result.getFiducialResults();
         // The FTC SDK does not expose the primary tag ID for result.getTx().
         // Require one tag so POI tx and the measured distance refer to the same target.
-        if (fiducials == null || fiducials.size() != 1) {
+        if (fiducials == null || fiducials.isEmpty()) {
             stopAlignment("Stopped: alignment requires exactly one visible tag.");
             return;
         }
