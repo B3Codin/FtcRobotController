@@ -35,6 +35,7 @@ public class AprilTag extends LinearOpMode {
     private static final double MIN_DRIVE_POWER = 0.2;
     private static final double MIN_TURN_POWER = 0.2;
     private static final long MAX_RESULT_AGE_MS = 150;
+    private static final long TARGET_REACQUIRE_TIMEOUT_NS = 1_000_000_000L;
     private static final long SETTLE_TIME_NS = 250_000_000L;
     private static final long ALIGNMENT_TIMEOUT_NS = 15_000_000_000L;
 
@@ -49,6 +50,7 @@ public class AprilTag extends LinearOpMode {
     private int alignmentTagId;
     private long alignmentStartedNs;
     private long inToleranceSinceNs;
+    private long targetLostSinceNs;
     private double lastCameraTimestamp = Double.NaN;
     private long lastNewFrameNs;
     private double clockwiseTurnRateDegrees;
@@ -157,6 +159,9 @@ public class AprilTag extends LinearOpMode {
             lastCameraTimestamp = result.getTimestamp();
             lastNewFrameNs = nowNs;
         }
+        telemetry.addData("Camera result age (ms)", result == null ? "No result" : result.getStaleness());
+        telemetry.addData("Camera frame age (ms)", (nowNs - lastNewFrameNs) / 1_000_000L);
+        telemetry.addData("Camera target valid", result != null && result.isValid());
 
         if (gamepad1.b || (aPressed && aligning)) {
             stopAlignment("Cancelled. Press A to try again.");
@@ -166,24 +171,50 @@ public class AprilTag extends LinearOpMode {
             setDrivePower(0.0, 0.0);
             return;
         }
+        if (!aligning) {
+            aligning = true;
+            alignmentTagId = -1; // Lock to a tag only after the first usable detection.
+            alignmentStartedNs = nowNs;
+            inToleranceSinceNs = 0;
+            targetLostSinceNs = 0;
+        }
+        // The overall timeout also applies while waiting for the camera.
+        if (nowNs - alignmentStartedNs >= ALIGNMENT_TIMEOUT_NS) {
+            stopAlignment("Stopped: alignment timed out. Press A to retry.");
+            return;
+        }
         if (!Double.isFinite(clockwiseTurnRateDegrees)) {
             stopAlignment("Stopped: invalid Pinpoint turn rate.");
             return;
         }
 
-        if (result == null || !result.isValid()
-                || result.getPipelineIndex() != APRILTAG_PIPELINE
-                || result.getStaleness() < 0 || result.getStaleness() > MAX_RESULT_AGE_MS
+        if (result == null) {
+            waitForTarget("no camera result", nowNs);
+            return;
+        }
+        if (result.getPipelineIndex() != APRILTAG_PIPELINE) {
+            stopAlignment("Stopped: wrong camera pipeline. Expected pipeline " + APRILTAG_PIPELINE + ".");
+            return;
+        }
+        if (result.getStaleness() < 0 || result.getStaleness() > MAX_RESULT_AGE_MS
                 || !Double.isFinite(result.getTimestamp())
                 || nowNs - lastNewFrameNs > MAX_RESULT_AGE_MS * 1_000_000L) {
-            stopAlignment("Stopped: no fresh AprilTag result. Press A to retry.");
+            waitForTarget("camera frame is old or not advancing", nowNs);
+            return;
+        }
+        if (!result.isValid()) {
+            waitForTarget("camera has no valid target", nowNs);
             return;
         }
 
         List<FiducialResult> fiducials = result.getFiducialResults();
         // The FTC SDK does not expose the primary tag ID for result.getTx().
         // Require one tag so POI tx and the measured distance refer to the same target.
-        if (fiducials == null || fiducials.size() != 1) {
+        if (fiducials == null || fiducials.isEmpty()) {
+            waitForTarget("no AprilTag detected", nowNs);
+            return;
+        }
+        if (fiducials.size() != 1) {
             stopAlignment("Stopped: alignment requires exactly one visible tag.");
             return;
         }
@@ -191,7 +222,7 @@ public class AprilTag extends LinearOpMode {
         Pose3D pose = tag.getRobotPoseTargetSpace();
         double tx = result.getTx(); // Uses the active pipeline's configured POI/crosshair.
         if (pose == null || !Double.isFinite(tx)) {
-            stopAlignment("Stopped: missing target pose or tx.");
+            waitForTarget("missing target pose or tx", nowNs);
             return;
         }
         Position position = pose.getPosition().toUnit(DistanceUnit.METER);
@@ -199,24 +230,23 @@ public class AprilTag extends LinearOpMode {
                 + position.y * position.y + position.z * position.z);
         // Missing Limelight 3D transforms can be returned as an all-zero pose.
         if (!Double.isFinite(distance) || distance <= 0.0) {
-            stopAlignment("Stopped: invalid 3D distance. Check Full 3D and camera setup.");
+            waitForTarget("invalid 3D distance; check Full 3D and camera setup", nowNs);
             return;
         }
 
-        if (!aligning) {
-            aligning = true;
+        if (alignmentTagId == -1) {
             alignmentTagId = tag.getFiducialId();
-            alignmentStartedNs = nowNs;
-            inToleranceSinceNs = 0;
         }
         if (tag.getFiducialId() != alignmentTagId) {
             stopAlignment("Stopped: target tag changed. Press A to retry.");
             return;
         }
-        if (nowNs - alignmentStartedNs >= ALIGNMENT_TIMEOUT_NS) {
-            stopAlignment("Stopped: alignment timed out. Press A to retry.");
+        // Do not resume after a long gap just because this loop finally saw a tag.
+        if (targetLostSinceNs != 0 && nowNs - targetLostSinceNs >= TARGET_REACQUIRE_TIMEOUT_NS) {
+            stopAlignment("Stopped: target unavailable for 1 second. Press A to retry.");
             return;
         }
+        targetLostSinceNs = 0;
 
         double distanceError = distance - TARGET_DISTANCE_METERS;
         boolean txAligned = Math.abs(tx) <= TX_TOLERANCE_DEGREES;
@@ -252,7 +282,22 @@ public class AprilTag extends LinearOpMode {
         setDrivePower(0.0, 0.0);
         aligning = false;
         inToleranceSinceNs = 0;
+        targetLostSinceNs = 0;
         alignmentStatus = status;
+    }
+
+    private void waitForTarget(String reason, long nowNs) {
+        // Never move on a cached measurement. Stay armed for a short reacquisition.
+        setDrivePower(0.0, 0.0);
+        inToleranceSinceNs = 0;
+        if (targetLostSinceNs == 0) targetLostSinceNs = nowNs;
+        long lostForNs = nowNs - targetLostSinceNs;
+        telemetry.addData("Target unavailable (ms)", lostForNs / 1_000_000L);
+        if (lostForNs >= TARGET_REACQUIRE_TIMEOUT_NS) {
+            stopAlignment("Stopped: " + reason + " for 1 second. Press A to retry.");
+        } else {
+            alignmentStatus = "Paused: " + reason + ". Waiting for AprilTag.";
+        }
     }
 
     private static double proportionalPower(double error, double gain, double minimum, double maximum) {
