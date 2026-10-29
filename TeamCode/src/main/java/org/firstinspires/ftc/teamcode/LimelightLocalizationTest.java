@@ -23,7 +23,7 @@ import java.util.List;
 @TeleOp(name = "Limelight Localization Test", group = "Sensor")
 public class LimelightLocalizationTest extends LinearOpMode {
     // PD gains use degrees for turning and meters for forward/backward distance.
-    private static final double TURN_P = 0.05;
+    private static final double TURN_P = 0.025;
     private static final double TURN_D = 0.0;
     private static final double DRIVE_P = 0.25;
     private static final double DRIVE_D = 0.0;
@@ -31,7 +31,7 @@ public class LimelightLocalizationTest extends LinearOpMode {
     private static final double DISTANCE_TOLERANCE_METERS = 0.05;
     private static final double TX_TOLERANCE_DEGREES = 1.0;
     private static final double MAX_DRIVE_TX_DEGREES = 10.0;
-    private static final double MIN_POWER = 0.2;
+    private static final double MIN_POWER = 0.15;
     private static final double MAX_POWER = 0.8;
     private static final long ALIGNMENT_TIMEOUT_NS = 2_000_000_000L;
     private static final int APRILTAG_PIPELINE = 0;
