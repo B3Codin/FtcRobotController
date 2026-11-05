@@ -19,6 +19,7 @@ import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
 
 /** Pedro AutoTune entry points discovered by the Pedro tuning dashboard. */
+@Configurable
 public final class Tuning {
     private Tuning() {}
 
