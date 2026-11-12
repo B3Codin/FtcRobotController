@@ -6,11 +6,13 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigurationType;
 
 /**
  * Tunes the REV Hub's encoder velocity PIDF loop, not a separate setPower PID loop.
  * Add an encoder-equipped motor named "flywheel" to the robot configuration.
- * Select its actual motor type so ticks/revolution and RPM are correct.
+ * Motor specifications below are for the team's 6000 RPM, 1:1 goBILDA flywheel.
+ * Overrides the generic series preset for this OpMode only.
  * Live changes are temporary; copy tuned values into the defaults below to save them.
  */
 @Configurable
@@ -18,10 +20,16 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 public class PIDTuning extends LinearOpMode {
     private static final String MOTOR_NAME = "flywheel";
     private static final DcMotor.Direction MOTOR_DIRECTION = DcMotor.Direction.FORWARD;
+    // The generic SDK "GoBILDA 5201 series" preset is 104 RPM / 1500 ticks,
+    // not the 6000 RPM, 1:1 motor used here.
+    private static final double MOTOR_MAX_RPM = 6000.0;
+    private static final double MOTOR_TICKS_PER_REV = 28.0;
     // Flywheel revolutions per configured motor-output-shaft revolution (1 for direct drive).
     private static final double FLYWHEEL_RATIO = 1.0;
     private static final double RPM_STEP = 100.0;
     private static final double RPM_TOLERANCE = 50.0;
+    // REV velocity feedforward uses ticks/second and a full-output scale of 32767.
+    private static final double STARTING_F = 32767.0 / (MOTOR_MAX_RPM * MOTOR_TICKS_PER_REV / 60.0);
     private static final String[] SETTINGS = {"P", "I", "D", "F", "Target RPM"};
     private static final double[] COEFFICIENT_STEPS = {0.001, 0.01, 0.1, 1.0, 10.0};
 
@@ -30,7 +38,7 @@ public class PIDTuning extends LinearOpMode {
     public static volatile double P = 0.0;
     public static volatile double I = 0.0;
     public static volatile double D = 0.0;
-    public static volatile double F = 0.0;
+    public static volatile double F = STARTING_F;
     public static volatile double TARGET_RPM = 0.0;
 
     private DcMotorEx flywheel;
@@ -56,6 +64,13 @@ public class PIDTuning extends LinearOpMode {
             flywheel.setPower(0.0);
             flywheel.setDirection(MOTOR_DIRECTION);
             flywheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+            MotorConfigurationType configuredType = flywheel.getMotorType();
+            // Clone before editing: SDK motor-type objects can be shared by other motors.
+            MotorConfigurationType flywheelType = configuredType.clone();
+            flywheelType.setMaxRPM(MOTOR_MAX_RPM);
+            flywheelType.setTicksPerRev(MOTOR_TICKS_PER_REV);
+            flywheelType.setGearing(1.0);
+            flywheel.setMotorType(flywheelType);
             flywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
             double ticksPerRev = flywheel.getMotorType().getTicksPerRev();
@@ -69,8 +84,14 @@ public class PIDTuning extends LinearOpMode {
             }
 
             telemetry.setMsTransmissionInterval(100);
+            telemetry.addData("Robot configuration preset", configuredType.getName());
+            telemetry.addData("Preset RPM / ticks per rev", "%.0f / %.0f",
+                    configuredType.getMaxRPM(), configuredType.getTicksPerRev());
+            telemetry.addData("Active motor RPM / ticks per rev", "%.0f / %.0f", MOTOR_MAX_RPM, ticksPerRev);
+            telemetry.addData("Maximum flywheel RPM", "%.0f", maxRPM);
+            telemetry.addData("Starting F estimate", "%.4f (tune under load)", STARTING_F);
             showControls();
-            telemetry.addLine("All PIDF defaults are zero. Tune F first, then P; add I/D only as needed.");
+            telemetry.addLine("Set a positive target RPM, then press A after START. Tune F first, then P.");
             telemetry.update();
             waitForStart();
 
@@ -78,13 +99,22 @@ public class PIDTuning extends LinearOpMode {
                 updateControls();
                 // Snapshot values once per loop because Panels may edit them concurrently.
                 double p = P, i = I, d = D, f = F, targetRPM = TARGET_RPM;
-                boolean valid = validCoefficient(p) && validCoefficient(i)
-                        && validCoefficient(d) && validCoefficient(f)
-                        && Double.isFinite(targetRPM) && targetRPM >= 0.0 && targetRPM <= maxRPM;
+                boolean validPIDF = validCoefficient(p) && validCoefficient(i)
+                        && validCoefficient(d) && validCoefficient(f);
+                boolean validRPM = Double.isFinite(targetRPM) && targetRPM >= 0.0 && targetRPM <= maxRPM;
+                boolean zeroPIDF = p == 0.0 && i == 0.0 && d == 0.0 && f == 0.0;
+                boolean valid = validPIDF && validRPM && !zeroPIDF;
+                String status;
                 if (!valid) {
                     running = false;
                     flywheel.setPower(0.0);
-                    telemetry.addLine("Stopped: use finite, nonnegative PIDF values and target RPM within range.");
+                    if (!validPIDF) {
+                        status = "STOPPED: PIDF must be finite and nonnegative; fix, then press A";
+                    } else if (!validRPM) {
+                        status = "STOPPED: target outside 0.." + maxRPM + " RPM; fix, then press A";
+                    } else {
+                        status = "STOPPED: all gains zero; set F near " + STARTING_F + ", then press A";
+                    }
                 } else {
                     if (appliedPIDF == null || p != appliedPIDF.p || i != appliedPIDF.i
                             || d != appliedPIDF.d || f != appliedPIDF.f) {
@@ -93,13 +123,16 @@ public class PIDTuning extends LinearOpMode {
                     }
                     if (running && targetRPM > 0.0) {
                         flywheel.setVelocity(targetRPM * ticksPerRev / (60.0 * FLYWHEEL_RATIO));
+                        status = "RUNNING (velocity commanded)";
                     } else {
                         flywheel.setPower(0.0);
+                        status = targetRPM == 0.0 ? "STOPPED: set a positive target RPM"
+                                : "STOPPED: press A to run";
                     }
                 }
 
                 double measuredRPM = flywheel.getVelocity() * 60.0 * FLYWHEEL_RATIO / ticksPerRev;
-                telemetry.addData("Flywheel", running && valid && targetRPM > 0.0 ? "RUNNING" : "STOPPED");
+                telemetry.addData("Flywheel", status);
                 telemetry.addData("Target / measured RPM", "%.0f / %.0f", targetRPM, measuredRPM);
                 telemetry.addData("RPM error", "%.1f", targetRPM - measuredRPM);
                 telemetry.addData("At speed (+/- " + RPM_TOLERANCE + " RPM)",
@@ -108,9 +141,9 @@ public class PIDTuning extends LinearOpMode {
                 telemetry.addData("Selected setting", SETTINGS[selectedSetting]);
                 telemetry.addData("Adjustment step", selectedSetting == 4 ? RPM_STEP : COEFFICIENT_STEPS[stepIndex]);
                 telemetry.addData("Configured maximum flywheel RPM", "%.0f", maxRPM);
-                if (p == 0.0 && i == 0.0 && d == 0.0 && f == 0.0) {
-                    telemetry.addLine("PIDF is all zero: no spin-up output until you tune the coefficients.");
-                }
+                telemetry.addData("Encoder ticks per motor rev", "%.0f", ticksPerRev);
+                telemetry.addData("Encoder position / ticks per second", "%d / %.1f",
+                        flywheel.getCurrentPosition(), flywheel.getVelocity());
                 showControls();
                 telemetry.update();
                 sleep(20);

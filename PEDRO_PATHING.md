@@ -1,6 +1,6 @@
 # Pedro Pathing setup
 
-This repository is wired for Pedro Pathing 3.0.0 with the Pedro tuning procedures
+This repository is wired for Pedro Pathing 3.0.2 with the Pedro tuning procedures
 from the official Quickstart. `build.dependencies.gradle` supplies the Dairy Maven
 repository and the `revhub`/`tuning` dependencies; the starter source lives under
 `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pedro`.
@@ -39,7 +39,7 @@ is enough space around it.
 
 Clone https://github.com/B3Codin/FtcRobotController.git on each computer and open
 the cloned project folder in Android Studio. This project uses FTC SDK 12.0.0,
-Pedro Pathing 3.0.0, tuning 1.0.0, and Panels 1.0.13.
+Pedro Pathing 3.0.2, tuning 1.0.3, and Panels 1.0.19.
 Install Android SDK Platform 34 if Android Studio requests it during sync. Let Android Studio configure each computer's local Android SDK path; local.properties
 is intentionally excluded from Git. Pull before editing, commit and push your changes,
 and have the deployment computer pull before installing TeamCode on the robot.
