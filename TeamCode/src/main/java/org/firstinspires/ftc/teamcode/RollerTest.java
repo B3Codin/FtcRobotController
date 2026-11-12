@@ -9,7 +9,7 @@ import com.qualcomm.robotcore.hardware.Servo;
 @TeleOp(name = "Roller Test", group = "Test")
 public class RollerTest extends LinearOpMode {
     // Change to -1.0 if LB rolls outward on your robot.
-    private static final double INTAKE_POWER = 1.0;
+    private static final double INTAKE_POWER = -1.0;
 
     @Override
     public void runOpMode() {

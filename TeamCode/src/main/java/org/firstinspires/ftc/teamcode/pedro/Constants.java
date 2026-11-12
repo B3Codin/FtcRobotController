@@ -25,17 +25,14 @@ public final class Constants {
     private Constants() {}
 
     public static final MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
-        c.frontLeftName.set("FLeft");
-        c.backLeftName.set("BLeft");
-        c.frontRightName.set("FRight");
-        c.backRightName.set("BRight");
-
-        // Conventional mecanum directions. Confirm with MecanumTuner on the real robot.
-        c.frontLeftDirection.set(DcMotorSimple.Direction.FORWARD);
-        c.backLeftDirection.set(DcMotorSimple.Direction.FORWARD);
-        c.frontRightDirection.set(DcMotorSimple.Direction.REVERSE);
-        c.backRightDirection.set(DcMotorSimple.Direction.REVERSE);
-        c.manualBrakeMode.set(true);
+            c.frontLeftName.set("FLeft");
+            c.frontRightName.set("FRight");
+            c.backLeftName.set("BLeft");
+            c.backRightName.set("BRight");
+            c.frontLeftDirection.set(DcMotorSimple.Direction.FORWARD);
+            c.frontRightDirection.set(DcMotorSimple.Direction.REVERSE);
+            c.backLeftDirection.set(DcMotorSimple.Direction.FORWARD);
+            c.backRightDirection.set(DcMotorSimple.Direction.REVERSE);
     });
 
     public static final PinpointConfig localizerConfig = new PinpointConfig(c -> {
