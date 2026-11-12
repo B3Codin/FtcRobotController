@@ -14,6 +14,8 @@ public class IntakeServoTest extends LinearOpMode {
                 hardwareMap.get(Servo.class, names[0]),
                 hardwareMap.get(Servo.class, names[1])
         };
+
+
         // getPosition reports the last command, not the measured physical position.
         // Do not send a new position until the driver requests an adjustment.
         double[] positions = {servos[0].getPosition(), servos[1].getPosition()};

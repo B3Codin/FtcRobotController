@@ -22,10 +22,11 @@ public class PIDTuning extends LinearOpMode {
     private static final DcMotor.Direction MOTOR_DIRECTION = DcMotor.Direction.FORWARD;
     // The generic SDK "GoBILDA 5201 series" preset is 104 RPM / 1500 ticks,
     // not the 6000 RPM, 1:1 motor used here.
-    private static final double MOTOR_MAX_RPM = 6000.0;
-    private static final double MOTOR_TICKS_PER_REV = 28.0;
+    // Shared with flywheelTest so motor specifications stay consistent.
+    static final double MOTOR_MAX_RPM = 6000.0;
+    static final double MOTOR_TICKS_PER_REV = 28.0;
     // Flywheel revolutions per configured motor-output-shaft revolution (1 for direct drive).
-    private static final double FLYWHEEL_RATIO = 1.0;
+    static final double FLYWHEEL_RATIO = 1.0;
     private static final double RPM_STEP = 100.0;
     private static final double RPM_TOLERANCE = 50.0;
     // REV velocity feedforward uses ticks/second and a full-output scale of 32767.
