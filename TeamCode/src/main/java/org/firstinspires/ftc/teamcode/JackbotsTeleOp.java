@@ -32,10 +32,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     // Separate REV Hub velocity gains for each flywheel, matching PIDTuning.
     // F is an initial estimate for the 6000 RPM / 28 ticks-per-revolution motors.
     // Copy your tuned P and F here. I and D are held at zero.
-    private static final double FLY_FRONT_P = 0.0;
-    private static final double FLY_FRONT_F = 32767.0 / (6000.0 * 28.0 / 60.0);
-    private static final double FLY_BACK_P = 0.0;
-    private static final double FLY_BACK_F = 32767.0 / (6000.0 * 28.0 / 60.0);
+    private static final double FLY_FRONT_P = 100;
+    private static final double FLY_FRONT_F = 10.547;
+    private static final double FLY_BACK_P = 100;
+    private static final double FLY_BACK_F = 11.211;
 
     // Match the motor specifications used in PIDTuning and flywheelTest.
     private static final double FLYWHEEL_MOTOR_MAX_RPM = 6000.0;
@@ -94,6 +94,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
             telemetry.addLine("A: reset X/Y (preserve heading) | LT: intake | RT: outtake");
             telemetry.addLine("Hold LB: turret positive | Hold RB: turret negative");
+            telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
+            telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | Y: toggle intake up/down");
             telemetry.addLine("Intake starts DOWN; positions are placeholders. First Y commands UP.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
@@ -182,6 +184,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
+                telemetry.addData("Turret LB / RB", "%b / %b", leftBumper, rightBumper);
+                telemetry.addData("Turret commanded power (both servos)", "%.2f", turretPower);
                 telemetry.addData("flyFront Target rpm", "%.0f", FLY_FRONT_TARGET_RPM);
                 telemetry.addData("flyBack Target rpm", "%.0f", FLY_BACK_TARGET_RPM);
                 telemetry.addData("flyFront rpm", "%.1f", flyFront.getVelocity() / ticksPerSecondPerRPM);
