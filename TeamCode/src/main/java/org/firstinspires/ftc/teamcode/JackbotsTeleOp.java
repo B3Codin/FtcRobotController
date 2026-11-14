@@ -21,7 +21,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double FLY_BACK_TARGET_RPM = -2100.0;
 
     // Turret power magnitude (0.0-1.0): LB applies positive, RB applies negative.
-    private static final double TURRET_POWER = 0.5;
+    private static final double TURRET_POWER = 0.2;
 
     // TODO: replace all four placeholders with measured up/down positions.
     private static final double INTAKE_LEFT_UP_POSITION = 0.73;
