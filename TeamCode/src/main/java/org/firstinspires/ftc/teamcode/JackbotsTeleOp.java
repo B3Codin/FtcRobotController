@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -12,12 +13,15 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 
-/** Emily's field-relative drive with intake and encoder-controlled flywheels. */
+/** Emily's field-relative drive with intake, turret, and encoder-controlled flywheels. */
 @TeleOp(name = "JackbotsTeleOp")
 public class JackbotsTeleOp extends LinearOpMode {
-    // EDIT THESE VALUES: flywheel setpoints, intake positions, and velocity-loop gains.
+    // EDIT THESE VALUES: flywheel setpoints, turret power, intake positions, and gains.
     private static final double FLY_FRONT_TARGET_RPM = -1500.0;
     private static final double FLY_BACK_TARGET_RPM = -2100.0;
+
+    // Turret power magnitude (0.0-1.0): LB applies positive, RB applies negative.
+    private static final double TURRET_POWER = 0.5;
 
     // TODO: replace all four placeholders with measured up/down positions.
     private static final double INTAKE_LEFT_UP_POSITION = 0.50;
@@ -38,11 +42,14 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double HEADING_OFFSET_DEGREES = 0.0;
     // Matches the tested direction in RollerTest; the right motor is reversed.
     private static final double INTAKE_ROLLER_POWER = -1.0;
+    // Triggers act as buttons: above this threshold runs the rollers at full power.
+    private static final double ROLLER_TRIGGER_THRESHOLD = 0.10;
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor rollLeft, rollRight;
     private DcMotorEx flyFront, flyBack;
     private Servo intakeLeft, intakeRight;
+    private CRServo leftTurretServo, rightTurretServo;
     private GoBildaPinpointDriver odo;
 
     @Override
@@ -57,6 +64,9 @@ public class JackbotsTeleOp extends LinearOpMode {
         flyBack = hardwareMap.get(DcMotorEx.class, "flyBack");
         intakeLeft = hardwareMap.get(Servo.class, "intakeLeft");
         intakeRight = hardwareMap.get(Servo.class, "intakeRight");
+        // Keep the configuration names (including spelling) from CRServosTest.
+        leftTurretServo = hardwareMap.get(CRServo.class, "leftTurrettServo");
+        rightTurretServo = hardwareMap.get(CRServo.class, "rightTurrettServo");
         odo = hardwareMap.get(GoBildaPinpointDriver.class, "odo");
 
         DcMotor[] allMotors = {
@@ -65,6 +75,8 @@ public class JackbotsTeleOp extends LinearOpMode {
         };
 
         try {
+            leftTurretServo.setPower(0.0);
+            rightTurretServo.setPower(0.0);
             // Same drive motor names and directions as Emily.
             configurePowerMotor(frontLeft, DcMotor.Direction.FORWARD);
             configurePowerMotor(backLeft, DcMotor.Direction.FORWARD);
@@ -78,7 +90,8 @@ public class JackbotsTeleOp extends LinearOpMode {
 
             telemetry.setMsTransmissionInterval(100);
             telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
-            telemetry.addLine("A: reset X/Y (preserve heading) | LB: intake | RB: outtake");
+            telemetry.addLine("A: reset X/Y (preserve heading) | LT: intake | RT: outtake");
+            telemetry.addLine("Hold LB: turret positive | Hold RB: turret negative");
             telemetry.addLine("X: toggle flywheels on/off | Y: toggle intake up/down");
             telemetry.addLine("Intake starts DOWN; positions are placeholders. First Y commands UP.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
@@ -102,6 +115,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 boolean y = gamepad1.y;
                 boolean leftBumper = gamepad1.left_bumper;
                 boolean rightBumper = gamepad1.right_bumper;
+                boolean leftTrigger = gamepad1.left_trigger > ROLLER_TRIGGER_THRESHOLD;
+                boolean rightTrigger = gamepad1.right_trigger > ROLLER_TRIGGER_THRESHOLD;
 
                 odo.update();
                 Pose2D pose = odo.getPosition();
@@ -123,15 +138,25 @@ public class JackbotsTeleOp extends LinearOpMode {
                         + fieldRight * Math.cos(heading);
                 drive(robotForward, robotRight, gamepad1.right_stick_x);
 
-                // Both bumpers or neither bumper stops the rollers.
+                // Both triggers or neither trigger stops the rollers.
                 double rollerPower = 0.0;
-                if (leftBumper && !rightBumper) {
+                if (leftTrigger && !rightTrigger) {
                     rollerPower = INTAKE_ROLLER_POWER;
-                } else if (rightBumper && !leftBumper) {
+                } else if (rightTrigger && !leftTrigger) {
                     rollerPower = -INTAKE_ROLLER_POWER;
                 }
                 rollLeft.setPower(rollerPower);
                 rollRight.setPower(rollerPower);
+
+                // Both turret CR servos run together, as in CRServosTest.
+                double turretPower = 0.0;
+                if (leftBumper && !rightBumper) {
+                    turretPower = TURRET_POWER;
+                } else if (rightBumper && !leftBumper) {
+                    turretPower = -TURRET_POWER;
+                }
+                leftTurretServo.setPower(turretPower);
+                rightTurretServo.setPower(turretPower);
 
                 if (x && !previousX) {
                     flywheelsEnabled = !flywheelsEnabled;
@@ -167,6 +192,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 idle();
             }
         } finally {
+            leftTurretServo.setPower(0.0);
+            rightTurretServo.setPower(0.0);
             for (DcMotor motor : allMotors) {
                 motor.setPower(0.0);
             }
