@@ -4,20 +4,21 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.Servo;
 
 /** Tests the turret servos and counter-rotating intake at full power. */
 @TeleOp(name = "CRServosTest", group = "Servo")
 public class CRServosTest extends LinearOpMode {
-    private static final double TEST_POWER = 1.0;
+    private static final double TEST_POWER = 0.5;
     private static final double INTAKE_POWER = 1.0;
 
     @Override
     public void runOpMode() {
         // These names must match the continuous rotation servos in the robot configuration.
-        CRServo left = hardwareMap.get(CRServo.class, "leftTurrettServo");
-        CRServo right = hardwareMap.get(CRServo.class, "rightTurrettServo");
-        DcMotor leftIntake = hardwareMap.get(DcMotor.class, "leftIntakeMotor");
-        DcMotor rightIntake = hardwareMap.get(DcMotor.class, "rightIntakeMotor");
+        CRServo left = hardwareMap.get(CRServo.class, "leftTurretServo");
+        CRServo right = hardwareMap.get(CRServo.class, "rightTurretServo");
+        DcMotor leftIntake = hardwareMap.get(DcMotor.class, "intakeLeft");
+        DcMotor rightIntake = hardwareMap.get(DcMotor.class, "intakeRight");
 
         try {
             left.setPower(0.0);
@@ -54,8 +55,8 @@ public class CRServosTest extends LinearOpMode {
                 telemetry.addLine("Both servos run together in the same direction.");
                 telemetry.addLine("D-pad right: +100% | left: -100% | B: stop");
                 telemetry.addLine("Hold A: intake forward 100% | Y: reverse 100% | A+Y: stop intake");
-                telemetry.addData("leftTurrettServo commanded power", "%.2f", power);
-                telemetry.addData("rightTurrettServo commanded power", "%.2f", power);
+                telemetry.addData("leftTurretServo commanded power", "%.2f", power);
+                telemetry.addData("rightTurretServo commanded power", "%.2f", power);
                 telemetry.addData("leftIntakeMotor commanded power (direction FORWARD)", "%.2f", intakePower);
                 telemetry.addData("rightIntakeMotor commanded power (direction REVERSE)", "%.2f", intakePower);
                 telemetry.update();

@@ -24,10 +24,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double TURRET_POWER = 0.5;
 
     // TODO: replace all four placeholders with measured up/down positions.
-    private static final double INTAKE_LEFT_UP_POSITION = 0.50;
-    private static final double INTAKE_RIGHT_UP_POSITION = 0.50;
-    private static final double INTAKE_LEFT_DOWN_POSITION = 0.66;
-    private static final double INTAKE_RIGHT_DOWN_POSITION = 0.51;
+    private static final double INTAKE_LEFT_UP_POSITION = 0.73;
+    private static final double INTAKE_RIGHT_UP_POSITION = 0.00;
+    private static final double INTAKE_LEFT_DOWN_POSITION = 0.64;
+    private static final double INTAKE_RIGHT_DOWN_POSITION = 0.46;
 
     // Shared by both flywheels; these are REV Hub velocity PIDF coefficients.
     // F is an initial estimate for the 6000 RPM / 28 ticks-per-revolution motors.
@@ -65,8 +65,8 @@ public class JackbotsTeleOp extends LinearOpMode {
         intakeLeft = hardwareMap.get(Servo.class, "intakeLeft");
         intakeRight = hardwareMap.get(Servo.class, "intakeRight");
         // Keep the configuration names (including spelling) from CRServosTest.
-        leftTurretServo = hardwareMap.get(CRServo.class, "leftTurrettServo");
-        rightTurretServo = hardwareMap.get(CRServo.class, "rightTurrettServo");
+        leftTurretServo = hardwareMap.get(CRServo.class, "leftTurretServo");
+        rightTurretServo = hardwareMap.get(CRServo.class, "rightTurretServo");
         odo = hardwareMap.get(GoBildaPinpointDriver.class, "odo");
 
         DcMotor[] allMotors = {
