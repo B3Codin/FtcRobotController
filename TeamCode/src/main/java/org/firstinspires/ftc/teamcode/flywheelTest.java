@@ -27,18 +27,9 @@ public class flywheelTest extends LinearOpMode {
             configureMotor(front, FRONT_DIRECTION);
             configureMotor(back, BACK_DIRECTION);
 
-            // Capture the tuner's current gains at INIT and apply the same set to both motors.
-            PIDFCoefficients gains = new PIDFCoefficients(PIDTuning.P, PIDTuning.I, PIDTuning.D, PIDTuning.F);
-            for (double value : new double[] {gains.p, gains.i, gains.d, gains.f}) {
-                if (!Double.isFinite(value) || value < 0.0) {
-                    throw new IllegalArgumentException("PIDTuning gains must be finite and nonnegative.");
-                }
-            }
-            if (gains.p == 0.0 && gains.i == 0.0 && gains.d == 0.0 && gains.f == 0.0) {
-                throw new IllegalArgumentException("PIDTuning gains are all zero; set a nonzero F before testing.");
-            }
-            front.setVelocityPIDFCoefficients(gains.p, gains.i, gains.d, gains.f);
-            back.setVelocityPIDFCoefficients(gains.p, gains.i, gains.d, gains.f);
+            // Capture each motor's separate P/F gains from the tuner at INIT.
+            PIDFCoefficients frontGains = configureGains(front, PIDTuning.FRONT_P, PIDTuning.FRONT_F);
+            PIDFCoefficients backGains = configureGains(back, PIDTuning.BACK_P, PIDTuning.BACK_F);
 
             double ticksPerSecondPerRPM = PIDTuning.MOTOR_TICKS_PER_REV
                     / (60.0 * PIDTuning.FLYWHEEL_RATIO);
@@ -46,8 +37,8 @@ public class flywheelTest extends LinearOpMode {
             telemetry.setMsTransmissionInterval(100);
             showControls();
             telemetry.addData("flyFront / flyBack target RPM", "%.0f / %.0f", frontTargetRPM, backTargetRPM);
-            telemetry.addData("P / I / D / F from PIDTuning", "%.4f / %.4f / %.4f / %.4f",
-                    gains.p, gains.i, gains.d, gains.f);
+            telemetry.addData("flyFront P / F from PIDTuning", "%.4f / %.4f", frontGains.p, frontGains.f);
+            telemetry.addData("flyBack P / F from PIDTuning", "%.4f / %.4f", backGains.p, backGains.f);
             telemetry.update();
             waitForStart();
 
@@ -104,6 +95,17 @@ public class flywheelTest extends LinearOpMode {
         telemetry.addLine("Hold A: run both flywheels | Release A or B: stop");
         telemetry.addLine("flyFront: D-pad up faster / down slower | flyBack: Y faster / X slower");
         telemetry.addLine("100 RPM per press; keeps spin direction. Targets reset on INIT.");
+    }
+
+    private static PIDFCoefficients configureGains(DcMotorEx motor, double p, double f) {
+        if (!Double.isFinite(p) || p < 0.0 || !Double.isFinite(f) || f < 0.0) {
+            throw new IllegalArgumentException("PIDTuning P/F must be finite and nonnegative.");
+        }
+        if (p == 0.0 && f == 0.0) {
+            throw new IllegalArgumentException("PIDTuning P/F are both zero; set a nonzero F before testing.");
+        }
+        motor.setVelocityPIDFCoefficients(p, 0.0, 0.0, f);
+        return new PIDFCoefficients(p, 0.0, 0.0, f);
     }
 
     private static void configureMotor(DcMotorEx motor, DcMotor.Direction direction) {

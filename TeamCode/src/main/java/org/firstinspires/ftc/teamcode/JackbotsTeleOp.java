@@ -29,11 +29,13 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double INTAKE_LEFT_DOWN_POSITION = 0.64;
     private static final double INTAKE_RIGHT_DOWN_POSITION = 0.46;
 
-    // Shared by both flywheels; these are REV Hub velocity PIDF coefficients.
+    // Separate REV Hub velocity gains for each flywheel, matching PIDTuning.
     // F is an initial estimate for the 6000 RPM / 28 ticks-per-revolution motors.
     // Copy your tuned P and F here. I and D are held at zero.
-    private static final double FLYWHEEL_P = 0.0;
-    private static final double FLYWHEEL_F = 32767.0 / (6000.0 * 28.0 / 60.0);
+    private static final double FLY_FRONT_P = 0.0;
+    private static final double FLY_FRONT_F = 32767.0 / (6000.0 * 28.0 / 60.0);
+    private static final double FLY_BACK_P = 0.0;
+    private static final double FLY_BACK_F = 32767.0 / (6000.0 * 28.0 / 60.0);
 
     // Match the motor specifications used in PIDTuning and flywheelTest.
     private static final double FLYWHEEL_MOTOR_MAX_RPM = 6000.0;
@@ -84,8 +86,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             configurePowerMotor(backRight, DcMotor.Direction.REVERSE);
             configurePowerMotor(rollLeft, DcMotor.Direction.FORWARD);
             configurePowerMotor(rollRight, DcMotor.Direction.REVERSE);
-            configureFlywheel(flyFront);
-            configureFlywheel(flyBack);
+            configureFlywheel(flyFront, FLY_FRONT_P, FLY_FRONT_F);
+            configureFlywheel(flyBack, FLY_BACK_P, FLY_BACK_F);
             configurePinpoint();
 
             telemetry.setMsTransmissionInterval(100);
@@ -207,7 +209,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
     }
 
-    private static void configureFlywheel(DcMotorEx motor) {
+    private static void configureFlywheel(DcMotorEx motor, double p, double f) {
         motor.setPower(0.0);
         motor.setDirection(DcMotor.Direction.FORWARD);
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
@@ -217,7 +219,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         type.setGearing(1.0);
         motor.setMotorType(type);
         motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motor.setVelocityPIDFCoefficients(FLYWHEEL_P, 0.0, 0.0, FLYWHEEL_F);
+        motor.setVelocityPIDFCoefficients(p, 0.0, 0.0, f);
     }
 
     private void configurePinpoint() {
