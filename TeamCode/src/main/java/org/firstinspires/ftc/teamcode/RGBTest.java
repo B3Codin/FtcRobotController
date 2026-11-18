@@ -25,7 +25,7 @@ public class RGBTest extends LinearOpMode {
 
     // goBILDA 3118-0808-0002 Product Insight #4, expressed in microseconds.
     // Explicitly using 500-2500 us avoids relying on the SDK's default PWM range.
-    private static final double PWM_MIN_US = 500;
+    private static final double PWM_MIN_US = 1300;
     private static final double PWM_MAX_US = 2500;
     private static final double OFF_US = 500;
     private static final double WHITE_US = 2500;
