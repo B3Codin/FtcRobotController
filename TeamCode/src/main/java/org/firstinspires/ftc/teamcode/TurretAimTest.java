@@ -32,11 +32,13 @@ public class TurretAimTest extends LinearOpMode {
     private static final double ENCODER_TICKS_PER_REVOLUTION = 8192.0;
     // Set to -1 if LB (positive turret power) makes the native raw count decrease.
     private static final int ENCODER_SIGN = 1;
-    // Original HYPOTHETICAL ratio: 3.75 encoder revolutions for ONE turret degree.
-    // This means 30720 counts/degree and 337.5 encoder revolutions for 90 degrees.
-    // Replace this value with the measured mechanism ratio; do not confuse it
-    // with encoder revolutions per full turret revolution.
-    private static final double ENCODER_REVOLUTIONS_PER_TURRET_DEGREE = 3.75;
+    // 2048 quadrature cycles = 8192 Hub counts per encoder revolution.
+    // The 24-tooth encoder gear turns 90/24 = 3.75 times per TURRET revolution.
+    // Therefore 8192 * 3.75 / 360 = 85.3333 counts per turret degree.
+    private static final double ENCODER_GEAR_TEETH = 24.0;
+    private static final double TURRET_GEAR_TEETH = 90.0;
+    private static final double ENCODER_REVOLUTIONS_PER_TURRET_DEGREE =
+            (TURRET_GEAR_TEETH / ENCODER_GEAR_TEETH) / 360.0;
     private static final String ZERO_SWITCH_NAME = "limitSwitch";
     private static final boolean ZERO_SWITCH_ACTIVE_LOW = true;
     private static final double ZERO_SWITCH_REARM_SECONDS = 0.05;
@@ -226,6 +228,10 @@ public class TurretAimTest extends LinearOpMode {
         telemetry.addData("Turret encoder ticks (signed, from zero)", signedEncoderTicks());
         telemetry.addData("Encoder revolutions", "%.6f", signedEncoderTicks() / ENCODER_TICKS_PER_REVOLUTION);
         telemetry.addData("Turret angle (degrees)", "%.6f", turretAngleDegrees());
+        telemetry.addData("Counts per turret degree", "%.6f",
+                ENCODER_TICKS_PER_REVOLUTION * ENCODER_REVOLUTIONS_PER_TURRET_DEGREE);
+        telemetry.addData("Expected counts at +90 degrees", "%.0f",
+                90.0 * ENCODER_TICKS_PER_REVOLUTION * ENCODER_REVOLUTIONS_PER_TURRET_DEGREE);
         telemetry.addData("Encoder tracking", encoderMovementSeen
                 ? "Count changes detected" : "No count changes detected since INIT");
         telemetry.addData("Turret LB / RB / X inputs", "%b / %b / %b",
