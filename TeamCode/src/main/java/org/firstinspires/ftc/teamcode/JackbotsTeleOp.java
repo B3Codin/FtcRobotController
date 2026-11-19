@@ -100,6 +100,17 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addLine("Intake starts DOWN; positions are placeholders. First Y commands UP.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
+            while (opModeInInit()) {
+                odo.update();
+                Pose2D pose = odo.getPosition();
+                telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
+                telemetry.addData("Odometry status", odo.getDeviceStatus());
+                telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
+                telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
+                telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
+                telemetry.update();
+                idle();
+            }
             waitForStart();
             if (isStopRequested()) return;
 
