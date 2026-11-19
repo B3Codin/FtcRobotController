@@ -1,6 +1,8 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
+import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -12,40 +14,56 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 
-/** Field-relative driving and an encoder-based turret test; field aiming is not enabled. */
+import java.util.List;
+
+/** Field-relative drive, manual turret testing and a repeatable absolute +90 degree move. */
+@Configurable
 @TeleOp(name = "TurretAimTest")
 public class TurretAimTest extends LinearOpMode {
-    // Future field aiming target, in meters relative to the odometry origin. UNUSED for now.
+    // Future field aiming target in meters relative to the odometry origin. UNUSED for now.
     private static final double FIELD_TARGET_X_METERS = 1.0;
     private static final double FIELD_TARGET_Y_METERS = 1.0;
 
-    // REV Through Bore Encoder V2 in Expansion Hub encoder port 0, shared with
-    // FRight's motor channel. Its quadrature output is 8192 counts per shaft revolution.
-    // Read through frontRight; never STOP_AND_RESET_ENCODER on this shared drive port.
+    // REV Through Bore Encoder V2: Expansion Hub encoder port 0, sharing FRight's
+    // motor channel. Read the controller's native count so drive REVERSE does not
+    // change encoder polarity. Never reset/change the shared drive motor's mode to zero.
     private static final double ENCODER_TICKS_PER_REVOLUTION = 8192.0;
-    // FRight's REVERSE motor direction also reverses getCurrentPosition(). Set this
-    // to -1 if positive turret motion makes that returned encoder count decrease.
+    // Set to -1 if LB (positive turret power) makes the native raw count decrease.
     private static final int ENCODER_SIGN = 1;
-    // Configure limitSwitch as a Digital Device on the Control Hub 0-1 connector.
-    // The REV magnetic switch pulls both signal pins low when a magnet is detected.
+    // Original HYPOTHETICAL ratio: 3.75 encoder revolutions for ONE turret degree.
+    // This means 30720 counts/degree and 337.5 encoder revolutions for 90 degrees.
+    // Replace this value with the measured mechanism ratio; do not confuse it
+    // with encoder revolutions per full turret revolution.
+    private static final double ENCODER_REVOLUTIONS_PER_TURRET_DEGREE = 3.75;
     private static final String ZERO_SWITCH_NAME = "limitSwitch";
     private static final boolean ZERO_SWITCH_ACTIVE_LOW = true;
-    private static final double ENCODER_REVOLUTIONS_PER_TURRET_DEGREE = 3.75;
-    private static final double TEST_TARGET_DEGREES = 90.0;
-    private static final double TURRET_LIMIT_DEGREES = 180.0;
-    // Same positive power convention as JackbotsTeleOp: both servos get +0.2.
-    private static final double TURRET_TEST_POWER = 0.2;
-    private static final double ENCODER_NO_PROGRESS_TIMEOUT_SECONDS = 1.0;
+    private static final double ZERO_SWITCH_REARM_SECONDS = 0.05;
     private static final double HEADING_OFFSET_DEGREES = 0.0;
 
+    // Live in Panels. Copy tuned values here to preserve them after a restart.
+    // Both CR servos drive the SAME turret, so they share one position controller.
+    // Auto output = P * error(deg) - D * velocity(deg/sec) + F * sign(error).
+    // F is a constant friction feedforward; there is no integral term.
+    public static volatile double TURRET_P = 0.02;
+    public static volatile double TURRET_D = 0.001;
+    public static volatile double TURRET_F = 0.05;
+    public static volatile double TURRET_MAX_POWER = 1.0;
+    // LB/RB use fixed power, bypassing PDF but obeying the same travel/stall checks.
+    public static volatile double TURRET_MANUAL_POWER = 0.2;
+
     private DcMotor frontLeft, frontRight, backLeft, backRight;
-    private DcMotor turretEncoder;
     private DigitalChannel limitSwitch;
     private CRServo leftTurretServo, rightTurretServo;
     private GoBildaPinpointDriver odo;
-    private int turretZeroTicks;
+    private List<LynxModule> hubs;
+    private int rawEncoderTicks;
+    private int zeroEncoderTicks;
+    private long deltaEncoderTicks;
     private boolean magnetDetected;
+    private boolean magnetArmed = true;
     private boolean magnetZeroEstablished;
+    private double lastMagnetSeen;
+    private int magnetResetCount;
 
     @Override
     public void runOpMode() {
@@ -64,23 +82,21 @@ public class TurretAimTest extends LinearOpMode {
             configureDriveMotor(frontRight, DcMotor.Direction.REVERSE);
             configureDriveMotor(backRight, DcMotor.Direction.REVERSE);
             configurePinpoint();
-
-            turretEncoder = frontRight;
+            hubs = hardwareMap.getAll(LynxModule.class);
             limitSwitch = hardwareMap.get(DigitalChannel.class, ZERO_SWITCH_NAME);
             limitSwitch.setMode(DigitalChannel.Mode.INPUT);
-            // Retain the straight-ahead INIT reference until the magnet is detected.
-            // Only change our offset: a hardware reset would interrupt FRight driving.
-            turretZeroTicks = turretEncoder.getCurrentPosition();
-            updateMagnetZero();
-            boolean encoderReady = ENCODER_SIGN == 1 || ENCODER_SIGN == -1;
+            ElapsedTime clock = new ElapsedTime();
+            sampleSensors();
+            zeroEncoderTicks = rawEncoderTicks;
+            updateMagnetZero(clock.seconds());
 
             telemetry.setMsTransmissionInterval(100);
             while (opModeInInit()) {
-                odo.update();
-                updateMagnetZero();
+                sampleSensors();
+                updateMagnetZero(clock.seconds());
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
-                telemetry.addLine("Start turret STRAIGHT; magnet detection corrects zero automatically.");
-                addTelemetry(odo.getPosition(), encoderReady, "Waiting for START", 0.0);
+                telemetry.addLine("Start turret STRAIGHT; magnet detection corrects zero.");
+                addTelemetry(odo.getPosition(), "Waiting for START", 0.0, 0.0);
                 telemetry.update();
                 idle();
             }
@@ -88,18 +104,16 @@ public class TurretAimTest extends LinearOpMode {
             if (isStopRequested()) return;
 
             boolean previousA = gamepad1.a;
-            boolean previousX = gamepad1.x;
-            boolean moving = false;
-            String fault = null;
-            String state = "Idle";
-            long lastProgressTicks = encoderTicks();
-            ElapsedTime noProgressTimer = new ElapsedTime();
-
+            TurretAimController controller = new TurretAimController(gamepad1.x);
+            controller.rebase(turretAngleDegrees(), signedEncoderTicks(), clock.seconds());
             while (opModeIsActive()) {
-                odo.update();
+                sampleSensors();
+                double now = clock.seconds();
+                if (updateMagnetZero(now)) {
+                    controller.rebase(turretAngleDegrees(), signedEncoderTicks(), now);
+                }
                 Pose2D pose = odo.getPosition();
                 boolean a = gamepad1.a;
-                boolean x = gamepad1.x;
                 if (a && !previousA) {
                     pose = new Pose2D(DistanceUnit.METER, 0.0, 0.0,
                             AngleUnit.RADIANS, pose.getHeading(AngleUnit.RADIANS));
@@ -114,54 +128,15 @@ public class TurretAimTest extends LinearOpMode {
                         fieldForward * Math.sin(heading) + fieldRight * Math.cos(heading),
                         gamepad1.right_stick_x);
 
-                long ticks = encoderTicks();
-                double angle = encoderReady ? turretAngleDegrees(ticks) : 0.0;
-                // Unwrapped angle: never normalize to +/-180, which would hide overtravel.
-                // Latch faults until STOP/re-init; X cannot override a limit fault.
-                if (encoderReady && Math.abs(angle) >= TURRET_LIMIT_DEGREES) {
-                    fault = "180 degree travel limit reached";
-                }
-                if (updateMagnetZero()) {
-                    // The reference changed, not the direction of physical motion.
-                    // Restart progress checks so re-zeroing cannot cause a false fault.
-                    ticks = encoderTicks();
-                    angle = encoderReady ? turretAngleDegrees(ticks) : 0.0;
-                    lastProgressTicks = ticks;
-                    noProgressTimer.reset();
-                }
-                if (x && !previousX && encoderReady && fault == null) {
-                    moving = angle < TEST_TARGET_DEGREES;
-                    state = moving ? "Moving positive to +90 degrees" : "Already at/past +90 degrees";
-                    lastProgressTicks = ticks;
-                    noProgressTimer.reset();
-                }
-                if (gamepad1.b) {
-                    moving = false;
-                    state = "Cancelled";
-                }
-
-                if (moving && fault == null) {
-                    if (angle >= TEST_TARGET_DEGREES) {
-                        moving = false;
-                        state = "Reached +90 degrees";
-                    } else if (ticks < lastProgressTicks) {
-                        fault = "Encoder moved negative: check ENCODER_SIGN / servo direction";
-                    } else if (ticks > lastProgressTicks) {
-                        lastProgressTicks = ticks;
-                        noProgressTimer.reset();
-                    } else if (noProgressTimer.seconds() >= ENCODER_NO_PROGRESS_TIMEOUT_SECONDS) {
-                        fault = "No encoder progress for 1 second";
-                    }
-                }
-                if (fault != null || !encoderReady) moving = false;
-                double turretPower = moving ? TURRET_TEST_POWER : 0.0;
-                setTurretPower(turretPower);
-
-                addTelemetry(pose, encoderReady, fault == null ? state : "FAULT: " + fault,
-                        turretPower);
+                TurretAimController.Settings settings = new TurretAimController.Settings(
+                        TURRET_P, TURRET_D, TURRET_F, TURRET_MAX_POWER, TURRET_MANUAL_POWER);
+                double power = controller.update(turretAngleDegrees(), signedEncoderTicks(), now,
+                        gamepad1.left_bumper, gamepad1.right_bumper, gamepad1.x, gamepad1.b, settings);
+                if (ENCODER_SIGN != 1 && ENCODER_SIGN != -1) power = 0.0;
+                setTurretPower(power);
+                addTelemetry(pose, controller.getState(), power, controller.getVelocity());
                 telemetry.update();
                 previousA = a;
-                previousX = x;
                 idle();
             }
         } finally {
@@ -173,50 +148,75 @@ public class TurretAimTest extends LinearOpMode {
         }
     }
 
-    private long encoderTicks() {
-        return turretEncoder == null ? 0L
-                : ENCODER_SIGN * ((long) turretEncoder.getCurrentPosition() - turretZeroTicks);
+    private void sampleSensors() {
+        // Refresh even if another OpMode left a Hub using MANUAL bulk caching.
+        for (LynxModule hub : hubs) hub.clearBulkCache();
+        odo.update();
+        int nextTicks = frontRight.getController().getMotorCurrentPosition(frontRight.getPortNumber());
+        deltaEncoderTicks = (long) nextTicks - rawEncoderTicks;
+        rawEncoderTicks = nextTicks;
     }
 
-    /** Zero once on entry into the magnet's detection zone, including during INIT. */
-    private boolean updateMagnetZero() {
-        boolean detected = ZERO_SWITCH_ACTIVE_LOW ? !limitSwitch.getState() : limitSwitch.getState();
-        boolean newlyDetected = detected && !magnetDetected;
-        if (newlyDetected) {
-            turretZeroTicks = turretEncoder.getCurrentPosition();
-            magnetZeroEstablished = true;
+    private long signedEncoderTicks() {
+        return ENCODER_SIGN * ((long) rawEncoderTicks - zeroEncoderTicks);
+    }
+
+    private double turretAngleDegrees() {
+        return signedEncoderTicks() / ENCODER_TICKS_PER_REVOLUTION
+                / ENCODER_REVOLUTIONS_PER_TURRET_DEGREE;
+    }
+
+    /** Zero on magnet entry, then require a clear interval before the next reset. */
+    private boolean updateMagnetZero(double now) {
+        magnetDetected = ZERO_SWITCH_ACTIVE_LOW ? !limitSwitch.getState() : limitSwitch.getState();
+        boolean reset = false;
+        if (magnetDetected) {
+            lastMagnetSeen = now;
+            if (magnetArmed) {
+                zeroEncoderTicks = rawEncoderTicks; // Software offset only; FRight keeps driving.
+                magnetZeroEstablished = true;
+                magnetResetCount++;
+                magnetArmed = false;
+                reset = true;
+            }
+        } else if (now - lastMagnetSeen >= ZERO_SWITCH_REARM_SECONDS) {
+            magnetArmed = true;
         }
-        // Do not keep resetting while the magnet remains near the sensor: the
-        // encoder must continue counting as the turret leaves the detection zone.
-        magnetDetected = detected;
-        return newlyDetected;
+        return reset;
     }
 
-    private double turretAngleDegrees(long ticks) {
-        return ticks / ENCODER_TICKS_PER_REVOLUTION / ENCODER_REVOLUTIONS_PER_TURRET_DEGREE;
-    }
-
-    private void addTelemetry(Pose2D pose, boolean encoderReady, String state, double power) {
+    private void addTelemetry(Pose2D pose, String state, double power, double velocity) {
         telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
-        telemetry.addLine("X: move turret to +90 degrees | B: cancel | A: reset odometry X/Y");
+        telemetry.addLine("LB: turret + | RB: turret - | Both: stop | X: absolute +90 | B: cancel/clear fault");
+        telemetry.addLine("A: reset odometry X/Y | P/D/F editable live in Panels");
         telemetry.addData("Odometry status", odo.getDeviceStatus());
         telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
         telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
         telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
-        telemetry.addData("Turret encoder found", turretEncoder != null);
-        telemetry.addData("Zero magnet detected", magnetDetected);
-        telemetry.addData("Magnet zero established", magnetZeroEstablished);
+        telemetry.addData("Encoder source", frontRight.getConnectionInfo());
+        telemetry.addData("Encoder motor port (expected 0)", frontRight.getPortNumber());
+        telemetry.addData("Native raw encoder ticks (unzeroed)", rawEncoderTicks);
+        telemetry.addData("Raw encoder tick change this loop", deltaEncoderTicks);
+        telemetry.addData("Turret encoder ticks (signed, from zero)", signedEncoderTicks());
+        telemetry.addData("Encoder revolutions", "%.6f", signedEncoderTicks() / ENCODER_TICKS_PER_REVOLUTION);
+        telemetry.addData("Turret angle (degrees)", "%.6f", turretAngleDegrees());
+        telemetry.addData("Counts per turret degree", "%.1f",
+                ENCODER_TICKS_PER_REVOLUTION * ENCODER_REVOLUTIONS_PER_TURRET_DEGREE);
+        telemetry.addLine("Ratio is hypothetical: 3.75 encoder turns PER DEGREE. Verify mechanically.");
+        if (deltaEncoderTicks == 0) {
+            telemetry.addLine("If raw ticks stay fixed WHILE MOVING, check Expansion Hub port 0 / encoder cable.");
+        }
+        telemetry.addData("Zero magnet detected / reset count", "%b / %d", magnetDetected, magnetResetCount);
         telemetry.addData("Zero reference", magnetZeroEstablished ? "Magnet" : "Straight-ahead INIT (provisional)");
-        telemetry.addData("Turret encoder ticks (signed, from zero)", encoderTicks());
-        if (encoderReady) {
-            telemetry.addData("Encoder revolutions", "%.3f", encoderTicks() / ENCODER_TICKS_PER_REVOLUTION);
-            telemetry.addData("Turret angle (degrees)", "%.2f", turretAngleDegrees(encoderTicks()));
-        } else {
+        telemetry.addData("Turret state", state);
+        telemetry.addData("Turret target / limits (degrees)", "+90 / +/-180 (inward recovery allowed)");
+        telemetry.addData("Turret velocity (deg/s)", "%.4f", velocity);
+        telemetry.addData("Turret power (both servos)", "%.3f", power);
+        telemetry.addData("P / D / F", "%.5f / %.5f / %.5f", TURRET_P, TURRET_D, TURRET_F);
+        telemetry.addData("Manual / max power", "%.3f / %.3f", TURRET_MANUAL_POWER, TURRET_MAX_POWER);
+        if (ENCODER_SIGN != 1 && ENCODER_SIGN != -1) {
             telemetry.addLine("TURRET DISABLED: ENCODER_SIGN must be +1 or -1.");
         }
-        telemetry.addData("Turret state", state);
-        telemetry.addData("Turret power (both servos)", "%.2f", power);
-        telemetry.addData("Turret limits (degrees)", "+/- %.0f", TURRET_LIMIT_DEGREES);
         telemetry.addData("Future field target (m), INACTIVE", "X %.2f / Y %.2f",
                 FIELD_TARGET_X_METERS, FIELD_TARGET_Y_METERS);
     }
