@@ -24,9 +24,11 @@ public class TurretAimTest extends LinearOpMode {
     private static final double FIELD_TARGET_X_METERS = 1.0;
     private static final double FIELD_TARGET_Y_METERS = 1.0;
 
-    // REV Through Bore Encoder V2: Expansion Hub encoder port 0, sharing FRight's
-    // motor channel. Read the controller's native count so drive REVERSE does not
-    // change encoder polarity. Never reset/change the shared drive motor's mode to zero.
+    // REV Through Bore Encoder V2 mechanically coupled to the TURRET.
+    // Read Expansion Hub encoder port 0 directly, independently of drive motor names.
+    // The standard Control Hub -> Expansion Hub RS485 connection makes the
+    // Expansion Hub the child module. Never reset its shared motor channel.
+    private static final int TURRET_ENCODER_PORT = 0;
     private static final double ENCODER_TICKS_PER_REVOLUTION = 8192.0;
     // Set to -1 if LB (positive turret power) makes the native raw count decrease.
     private static final int ENCODER_SIGN = 1;
@@ -60,6 +62,9 @@ public class TurretAimTest extends LinearOpMode {
     private CRServo leftTurretServo, rightTurretServo;
     private GoBildaPinpointDriver odo;
     private List<LynxModule> hubs;
+    private LynxModule turretEncoderHub;
+    private boolean encoderSampled;
+    private boolean encoderMovementSeen;
     private int rawEncoderTicks;
     private int zeroEncoderTicks;
     private long deltaEncoderTicks;
@@ -87,6 +92,17 @@ public class TurretAimTest extends LinearOpMode {
             configureDriveMotor(backRight, DcMotor.Direction.REVERSE);
             configurePinpoint();
             hubs = hardwareMap.getAll(LynxModule.class);
+            for (LynxModule hub : hubs) {
+                if (!hub.isParent()) {
+                    if (turretEncoderHub != null) {
+                        throw new IllegalStateException("Multiple Expansion Hubs: select turret encoder Hub explicitly.");
+                    }
+                    turretEncoderHub = hub;
+                }
+            }
+            if (turretEncoderHub == null) {
+                throw new IllegalStateException("No child Expansion Hub found. Check RS485 connection and robot configuration.");
+            }
             limitSwitch = hardwareMap.get(DigitalChannel.class, ZERO_SWITCH_NAME);
             limitSwitch.setMode(DigitalChannel.Mode.INPUT);
             ElapsedTime clock = new ElapsedTime();
@@ -157,8 +173,14 @@ public class TurretAimTest extends LinearOpMode {
         // Refresh even if another OpMode left a Hub using MANUAL bulk caching.
         for (LynxModule hub : hubs) hub.clearBulkCache();
         odo.update();
-        int nextTicks = frontRight.getController().getMotorCurrentPosition(frontRight.getPortNumber());
-        deltaEncoderTicks = (long) nextTicks - rawEncoderTicks;
+        LynxModule.BulkData encoderData = turretEncoderHub.getBulkData();
+        if (encoderData.isFake()) {
+            throw new IllegalStateException("Expansion Hub encoder read failed; stopping instead of reporting zero.");
+        }
+        int nextTicks = encoderData.getMotorCurrentPosition(TURRET_ENCODER_PORT);
+        deltaEncoderTicks = encoderSampled ? (long) nextTicks - rawEncoderTicks : 0L;
+        encoderMovementSeen |= deltaEncoderTicks != 0;
+        encoderSampled = true;
         rawEncoderTicks = nextTicks;
     }
 
@@ -178,7 +200,7 @@ public class TurretAimTest extends LinearOpMode {
         if (magnetDetected) {
             lastMagnetSeen = now;
             if (magnetArmed) {
-                zeroEncoderTicks = rawEncoderTicks; // Software offset only; FRight keeps driving.
+                zeroEncoderTicks = rawEncoderTicks; // Software offset only; shared motor keeps driving.
                 magnetZeroEstablished = true;
                 magnetResetCount++;
                 magnetArmed = false;
@@ -197,11 +219,18 @@ public class TurretAimTest extends LinearOpMode {
         telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
         telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
         telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
+        telemetry.addData("Turret encoder Hub", hardwareMap.getNamesOf(turretEncoderHub));
+        telemetry.addData("Turret encoder port", TURRET_ENCODER_PORT);
         telemetry.addData("Native raw encoder ticks (unzeroed)", rawEncoderTicks);
         telemetry.addData("Raw encoder tick change this loop", deltaEncoderTicks);
         telemetry.addData("Turret encoder ticks (signed, from zero)", signedEncoderTicks());
         telemetry.addData("Encoder revolutions", "%.6f", signedEncoderTicks() / ENCODER_TICKS_PER_REVOLUTION);
         telemetry.addData("Turret angle (degrees)", "%.6f", turretAngleDegrees());
+        telemetry.addData("Encoder tracking", encoderMovementSeen
+                ? "Count changes detected" : "No count changes detected since INIT");
+        telemetry.addData("Turret LB / RB / X inputs", "%b / %b / %b",
+                gamepad1.left_bumper, gamepad1.right_bumper, gamepad1.x);
+        telemetry.addLine("Control state does not gate encoder tracking; readings update even while Idle.");
         if (deltaEncoderTicks == 0) {
             telemetry.addLine("If raw ticks stay fixed WHILE MOVING, check Expansion Hub port 0 / encoder cable.");
         }
