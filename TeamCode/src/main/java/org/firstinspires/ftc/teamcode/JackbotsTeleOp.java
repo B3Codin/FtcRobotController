@@ -1,12 +1,16 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
+import com.qualcomm.hardware.rev.RevColorSensorV3;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.NormalizedRGBA;
+import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.ServoImplEx;
 import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigurationType;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
@@ -46,6 +50,13 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double INTAKE_ROLLER_POWER = -1.0;
     // Triggers act as buttons: above this threshold runs the rollers at full power.
     private static final double ROLLER_TRIGGER_THRESHOLD = 0.10;
+    // ColorSenseTest calibration, applied to every hue.
+    private static final float COLOR_GAIN = 2.0f;
+    private static final float MIN_COLOR_SIGNAL = 0.005f;
+    private static final float MIN_COLOR_SATURATION = 0.20f;
+    // RGBTest uses 500–2500 us PWM, with off at 500 us and green at 1500 us.
+    private static final double RGB_OFF = 0.0;
+    private static final double RGB_GREEN = 0.5;
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor rollLeft, rollRight;
@@ -66,6 +77,11 @@ public class JackbotsTeleOp extends LinearOpMode {
         flyBack = hardwareMap.get(DcMotorEx.class, "flyBack");
         intakeLeft = hardwareMap.get(Servo.class, "intakeLeft");
         intakeRight = hardwareMap.get(Servo.class, "intakeRight");
+        RevColorSensorV3 colorSensor = hardwareMap.get(RevColorSensorV3.class, "colorSensor");
+        ServoImplEx[] indicators = {
+                hardwareMap.get(ServoImplEx.class, "LeftRGB"),
+                hardwareMap.get(ServoImplEx.class, "RightRGB")
+        };
         // Keep the configuration names (including spelling) from CRServosTest.
         leftTurretServo = hardwareMap.get(CRServo.class, "leftTurretServo");
         rightTurretServo = hardwareMap.get(CRServo.class, "rightTurretServo");
@@ -77,6 +93,12 @@ public class JackbotsTeleOp extends LinearOpMode {
         };
 
         try {
+            colorSensor.setGain(COLOR_GAIN);
+            for (ServoImplEx indicator : indicators) {
+                indicator.setDirection(Servo.Direction.FORWARD);
+                indicator.setPwmRange(new PwmControl.PwmRange(500, 2500));
+                indicator.setPosition(RGB_OFF);
+            }
             leftTurretServo.setPower(0.0);
             rightTurretServo.setPower(0.0);
             // Same drive motor names and directions as Emily.
@@ -100,7 +122,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | Y: toggle intake up/down");
-            telemetry.addLine("Intake starts DOWN; positions are placeholders. First Y commands UP.");
+            telemetry.addLine("Intake starts DOWN. Color raises intake and lights both RGBs green.");
+            telemetry.addLine("Rollers work only with the intake DOWN.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
             while (opModeInInit()) {
@@ -122,7 +145,6 @@ public class JackbotsTeleOp extends LinearOpMode {
 
             boolean previousA = false, previousX = false, previousY = false;
             boolean flywheelsEnabled = false;
-            // Match the down positions commanded at START. First Y press goes UP.
             boolean intakeUp = false;
             double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
@@ -158,15 +180,25 @@ public class JackbotsTeleOp extends LinearOpMode {
                         + fieldRight * Math.cos(heading);
                 drive(robotForward, robotRight, gamepad1.right_stick_x);
 
-                // Both triggers or neither trigger stops the rollers.
+                boolean colorDetected = detectsColor(colorSensor.getNormalizedColors());
+                for (ServoImplEx indicator : indicators) {
+                    indicator.setPosition(colorDetected ? RGB_GREEN : RGB_OFF);
+                }
+
+                if (colorDetected) {
+                    intakeUp = true;
+                } else if (y && !previousY) {
+                    intakeUp = !intakeUp;
+                }
+
                 double rollerPower = 0.0;
-                if (leftTrigger && !rightTrigger) {
-                    rollerPower = INTAKE_ROLLER_POWER;
-                } else if (rightTrigger && !leftTrigger) {
-                    rollerPower = -INTAKE_ROLLER_POWER;
+                if (!intakeUp && leftTrigger != rightTrigger) {
+                    rollerPower = leftTrigger ? INTAKE_ROLLER_POWER : -INTAKE_ROLLER_POWER;
                 }
                 rollLeft.setPower(rollerPower);
                 rollRight.setPower(rollerPower);
+                intakeLeft.setPosition(intakeUp ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
+                intakeRight.setPosition(intakeUp ? INTAKE_RIGHT_UP_POSITION : INTAKE_RIGHT_DOWN_POSITION);
 
                 // Both turret CR servos run together, as in CRServosTest.
                 double turretPower = 0.0;
@@ -189,14 +221,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                     flyBack.setPower(0.0);
                 }
 
-                if (y && !previousY) {
-                    intakeUp = !intakeUp;
-                    intakeLeft.setPosition(intakeUp
-                            ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
-                    intakeRight.setPosition(intakeUp
-                            ? INTAKE_RIGHT_UP_POSITION : INTAKE_RIGHT_DOWN_POSITION);
-                }
-
+                telemetry.addData("Color detected", colorDetected);
+                telemetry.addData("Intake", intakeUp ? "UP" : "DOWN");
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
@@ -219,7 +245,16 @@ public class JackbotsTeleOp extends LinearOpMode {
             for (DcMotor motor : allMotors) {
                 motor.setPower(0.0);
             }
+            for (ServoImplEx indicator : indicators) {
+                indicator.setPosition(RGB_OFF);
+            }
         }
+    }
+
+    private static boolean detectsColor(NormalizedRGBA colors) {
+        float peak = Math.max(colors.red, Math.max(colors.green, colors.blue));
+        float min = Math.min(colors.red, Math.min(colors.green, colors.blue));
+        return peak >= MIN_COLOR_SIGNAL && (peak - min) / peak >= MIN_COLOR_SATURATION;
     }
 
     private static void configurePowerMotor(DcMotor motor, DcMotor.Direction direction) {
