@@ -17,26 +17,33 @@ import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigu
 @Configurable
 @TeleOp(name = "PIDTuning", group = "Tuning")
 public class PIDTuning extends LinearOpMode {
-    // Shared with flywheelTest: 6000 RPM, 28 ticks/rev, direct-drive goBILDA motors.
-    // Override the generic 104 RPM / 1500 ticks-per-rev series preset.
+    // Direct-drive motor specs shared with flywheelTest.
     static final double MOTOR_MAX_RPM = 6000.0;
     static final double MOTOR_TICKS_PER_REV = 28.0;
+    // Flywheel revolutions per gearbox output revolution.
     static final double FLYWHEEL_RATIO = 1.0;
+
+    // Match the geared goBILDA Yellow Jacket front motor in JackbotsTeleOp.
+    private static final double FRONT_MOTOR_MAX_RPM = 1150.0;
+    private static final double FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
+    private static final double FRONT_TICKS_PER_REV = MOTOR_TICKS_PER_REV * FRONT_MOTOR_GEARING;
+    private static final double[] MAX_FLYWHEEL_RPM = {
+            FRONT_MOTOR_MAX_RPM * FLYWHEEL_RATIO, MOTOR_MAX_RPM * FLYWHEEL_RATIO
+    };
     private static final double RPM_STEP = 100.0;
     private static final double RPM_TOLERANCE = 50.0;
-    // REV velocity feedforward uses ticks/second and a full-output scale of 32767.
-    private static final double STARTING_F = 32767.0
-            / (MOTOR_MAX_RPM * MOTOR_TICKS_PER_REV / 60.0);
+    private static final double FRONT_STARTING_F = startingF(FRONT_MOTOR_MAX_RPM, FRONT_TICKS_PER_REV);
+    private static final double BACK_STARTING_F = startingF(MOTOR_MAX_RPM, MOTOR_TICKS_PER_REV);
     private static final String[] MOTOR_NAMES = {"flyFront", "flyBack"};
     private static final String[] SETTINGS = {"P", "F", "Target RPM"};
     private static final double[] COEFFICIENT_STEPS = {0.001, 0.01, 0.1, 1.0, 10.0};
 
     // Edit live in Panels or with gamepad 1. These are REV velocity-loop gains.
     public static volatile double FRONT_P = 0.0;
-    public static volatile double FRONT_F = STARTING_F;
-    public static volatile double FRONT_TARGET_RPM = -1500.0;
+    public static volatile double FRONT_F = FRONT_STARTING_F;
+    public static volatile double FRONT_TARGET_RPM = -1000.0;
     public static volatile double BACK_P = 0.0;
-    public static volatile double BACK_F = STARTING_F;
+    public static volatile double BACK_F = BACK_STARTING_F;
     public static volatile double BACK_TARGET_RPM = -2100.0;
 
     private final boolean[] running = new boolean[2];
@@ -67,16 +74,21 @@ public class PIDTuning extends LinearOpMode {
                 return;
             }
 
-            for (DcMotorEx motor : motors) {
-                configureMotor(motor);
-            }
-            double maxRPM = MOTOR_MAX_RPM * FLYWHEEL_RATIO;
-            double ticksPerSecondPerRPM = MOTOR_TICKS_PER_REV / (60.0 * FLYWHEEL_RATIO);
+            configureMotor(motors[0], FRONT_MOTOR_MAX_RPM, FRONT_MOTOR_GEARING, FRONT_TICKS_PER_REV);
+            configureMotor(motors[1], MOTOR_MAX_RPM, 1.0, MOTOR_TICKS_PER_REV);
+            double[] ticksPerSecondPerRPM = {
+                    FRONT_TICKS_PER_REV / (60.0 * FLYWHEEL_RATIO),
+                    MOTOR_TICKS_PER_REV / (60.0 * FLYWHEEL_RATIO)
+            };
+            double[] startingF = {FRONT_STARTING_F, BACK_STARTING_F};
 
             telemetry.setMsTransmissionInterval(100);
-            telemetry.addData("Motor RPM / ticks per revolution", "%.0f / %.0f",
+            telemetry.addData("flyFront rated RPM / ticks per output rev", "%.0f / %.1f",
+                    FRONT_MOTOR_MAX_RPM, FRONT_TICKS_PER_REV);
+            telemetry.addData("flyBack rated RPM / ticks per output rev", "%.0f / %.1f",
                     MOTOR_MAX_RPM, MOTOR_TICKS_PER_REV);
-            telemetry.addData("Starting F estimate", "%.4f (tune under load)", STARTING_F);
+            telemetry.addData("flyFront / flyBack starting F", "%.4f / %.4f (tune under load)",
+                    FRONT_STARTING_F, BACK_STARTING_F);
             telemetry.addLine("Both motors start OFF. Tune F first, then P, for each motor.");
             telemetry.addLine("Negative RPM matches JackbotsTeleOp; use Panels to change sign.");
             showControls();
@@ -90,14 +102,16 @@ public class PIDTuning extends LinearOpMode {
                 double[] f = {FRONT_F, BACK_F};
                 double[] targetRPM = {FRONT_TARGET_RPM, BACK_TARGET_RPM};
 
-                telemetry.addData("Selected motor", MOTOR_NAMES[selectedMotor]);
+                telemetry.addData("Selected motor", "%s (max %.0f RPM)",
+                        MOTOR_NAMES[selectedMotor], MAX_FLYWHEEL_RPM[selectedMotor]);
                 telemetry.addData("Selected setting", SETTINGS[selectedSetting]);
                 telemetry.addData("Adjustment step", selectedSetting == 2
                         ? RPM_STEP : COEFFICIENT_STEPS[stepIndex]);
 
                 for (int index = 0; index < motors.length; index++) {
                     DcMotorEx motor = motors[index];
-                    String problem = settingsProblem(p[index], f[index], targetRPM[index], maxRPM);
+                    String problem = settingsProblem(p[index], f[index], targetRPM[index],
+                            MAX_FLYWHEEL_RPM[index], startingF[index]);
                     String status;
                     if (problem != null) {
                         running[index] = false;
@@ -110,7 +124,7 @@ public class PIDTuning extends LinearOpMode {
                             appliedPIDF[index] = new PIDFCoefficients(p[index], 0.0, 0.0, f[index]);
                         }
                         if (running[index] && targetRPM[index] != 0.0) {
-                            motor.setVelocity(targetRPM[index] * ticksPerSecondPerRPM);
+                            motor.setVelocity(targetRPM[index] * ticksPerSecondPerRPM[index]);
                             status = "RUNNING";
                         } else {
                             motor.setPower(0.0);
@@ -119,7 +133,7 @@ public class PIDTuning extends LinearOpMode {
                         }
                     }
 
-                    double measuredRPM = motor.getVelocity() / ticksPerSecondPerRPM;
+                    double measuredRPM = motor.getVelocity() / ticksPerSecondPerRPM[index];
                     String name = MOTOR_NAMES[index];
                     telemetry.addData(name + " status", status);
                     telemetry.addData(name + " target / measured RPM", "%.0f / %.1f",
@@ -133,7 +147,6 @@ public class PIDTuning extends LinearOpMode {
                             motor.getCurrentPosition(), motor.getVelocity());
                 }
 
-                telemetry.addData("Maximum flywheel RPM", "%.0f", maxRPM);
                 showControls();
                 telemetry.update();
                 sleep(20);
@@ -164,18 +177,19 @@ public class PIDTuning extends LinearOpMode {
         if (down && !previousDown) change -= step;
         boolean reset = x && !previousX;
         if (change != 0.0 || reset) {
+            double maxRPM = MAX_FLYWHEEL_RPM[selectedMotor];
             if (selectedMotor == 0) {
                 switch (selectedSetting) {
                     case 0: FRONT_P = adjustedCoefficient(FRONT_P, change, reset); break;
                     case 1: FRONT_F = adjustedCoefficient(FRONT_F, change, reset); break;
-                    case 2: FRONT_TARGET_RPM = adjustedRPM(FRONT_TARGET_RPM, change, reset); break;
+                    case 2: FRONT_TARGET_RPM = adjustedRPM(FRONT_TARGET_RPM, change, reset, maxRPM); break;
                     default: break;
                 }
             } else {
                 switch (selectedSetting) {
                     case 0: BACK_P = adjustedCoefficient(BACK_P, change, reset); break;
                     case 1: BACK_F = adjustedCoefficient(BACK_F, change, reset); break;
-                    case 2: BACK_TARGET_RPM = adjustedRPM(BACK_TARGET_RPM, change, reset); break;
+                    case 2: BACK_TARGET_RPM = adjustedRPM(BACK_TARGET_RPM, change, reset, maxRPM); break;
                     default: break;
                 }
             }
@@ -201,17 +215,17 @@ public class PIDTuning extends LinearOpMode {
         return change == 0.0 ? value : Math.max(0.0, value + change);
     }
 
-    private static double adjustedRPM(double value, double change, boolean reset) {
+    private static double adjustedRPM(double value, double change, boolean reset, double maxRPM) {
         // Up/down adjusts speed magnitude, keeping the motor's commanded direction.
         // Use negative direction when starting from zero, matching the robot's setpoints.
         double direction = value == 0.0 ? -1.0 : value;
         if (reset) return Math.copySign(0.0, direction);
-        double speed = Math.max(0.0, Math.min(MOTOR_MAX_RPM * FLYWHEEL_RATIO,
-                Math.abs(value) + change));
+        double speed = Math.max(0.0, Math.min(maxRPM, Math.abs(value) + change));
         return Math.copySign(speed, direction);
     }
 
-    private static String settingsProblem(double p, double f, double targetRPM, double maxRPM) {
+    private static String settingsProblem(double p, double f, double targetRPM, double maxRPM,
+                                          double startingF) {
         if (!Double.isFinite(p) || p < 0.0 || !Double.isFinite(f) || f < 0.0) {
             return "P and F must be finite and nonnegative";
         }
@@ -219,20 +233,26 @@ public class PIDTuning extends LinearOpMode {
             return "target outside +/- " + maxRPM + " RPM";
         }
         if (p == 0.0 && f == 0.0) {
-            return "P and F are both zero; set F near " + STARTING_F;
+            return "P and F are both zero; set F near " + startingF;
         }
         return null;
     }
 
-    private static void configureMotor(DcMotorEx motor) {
+    private static double startingF(double maxRPM, double ticksPerRev) {
+        // REV velocity feedforward uses ticks/second and a full-output scale of 32767.
+        return 32767.0 / (maxRPM * ticksPerRev / 60.0);
+    }
+
+    private static void configureMotor(DcMotorEx motor, double maxRPM, double gearing,
+                                       double ticksPerRev) {
         motor.setPower(0.0);
         motor.setDirection(DcMotor.Direction.FORWARD);
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         // Clone first: SDK motor-type objects can be shared by other motors.
         MotorConfigurationType type = motor.getMotorType().clone();
-        type.setMaxRPM(MOTOR_MAX_RPM);
-        type.setTicksPerRev(MOTOR_TICKS_PER_REV);
-        type.setGearing(1.0);
+        type.setMaxRPM(maxRPM);
+        type.setTicksPerRev(ticksPerRev);
+        type.setGearing(gearing);
         motor.setMotorType(type);
         motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
     }
