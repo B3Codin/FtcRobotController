@@ -16,7 +16,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 
 import java.util.List;
 
-/** Field-relative drive, manual turret testing and a repeatable absolute +90 degree move. */
+/** Field-relative drive, manual turret testing and repeatable +90/0/-90 degree moves. */
 @Configurable
 @TeleOp(name = "TurretAimTest")
 public class TurretAimTest extends LinearOpMode {
@@ -49,13 +49,13 @@ public class TurretAimTest extends LinearOpMode {
     // Auto: fixed bang-bang power outside PDF range, then
     // P * error(deg) - D * velocity(deg/sec) + F * sign(error) inside the range.
     // F is a constant friction feedforward; there is no integral term.
-    public static volatile double TURRET_P = 0.02;
-    public static volatile double TURRET_D = 0.001;
+    public static volatile double TURRET_P = 0.002;
+    public static volatile double TURRET_D = 0.0;
     public static volatile double TURRET_F = 0.05;
     public static volatile double TURRET_MAX_POWER = 1.0;
     public static volatile double TURRET_BANG_BANG_POWER = 1.0;
     // Switch to PDF when absolute target error is <= this many degrees.
-    public static volatile double TURRET_PDF_RANGE_DEGREES = 10.0;
+    public static volatile double TURRET_PDF_RANGE_DEGREES = 30.0;
     // LB/RB use fixed power, bypassing PDF but obeying the same travel/stall checks.
     public static volatile double TURRET_MANUAL_POWER = 0.2;
 
@@ -118,7 +118,7 @@ public class TurretAimTest extends LinearOpMode {
                 updateMagnetZero(clock.seconds());
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
                 telemetry.addLine("Start turret STRAIGHT; magnet detection corrects zero.");
-                addTelemetry(odo.getPosition(), "Waiting for START", 0.0, 0.0);
+                addTelemetry(odo.getPosition(), "Waiting for START", 0.0, 0.0, 90.0);
                 telemetry.update();
                 idle();
             }
@@ -126,7 +126,7 @@ public class TurretAimTest extends LinearOpMode {
             if (isStopRequested()) return;
 
             boolean previousA = gamepad1.a;
-            TurretAimController controller = new TurretAimController(gamepad1.x);
+            TurretAimController controller = new TurretAimController(gamepad1.x, gamepad1.y, gamepad1.b);
             controller.rebase(turretAngleDegrees(), signedEncoderTicks(), clock.seconds());
             while (opModeIsActive()) {
                 sampleSensors();
@@ -154,10 +154,11 @@ public class TurretAimTest extends LinearOpMode {
                         TURRET_P, TURRET_D, TURRET_F, TURRET_MAX_POWER, TURRET_MANUAL_POWER,
                         TURRET_BANG_BANG_POWER, TURRET_PDF_RANGE_DEGREES);
                 double power = controller.update(turretAngleDegrees(), signedEncoderTicks(), now,
-                        gamepad1.left_bumper, gamepad1.right_bumper, gamepad1.x, gamepad1.b, settings);
+                        gamepad1.left_bumper, gamepad1.right_bumper,
+                        gamepad1.x, gamepad1.y, gamepad1.b, settings);
                 if (ENCODER_SIGN != 1 && ENCODER_SIGN != -1) power = 0.0;
                 setTurretPower(power);
-                addTelemetry(pose, controller.getState(), power, controller.getVelocity());
+                addTelemetry(pose, controller.getState(), power, controller.getVelocity(), controller.getTargetDegrees());
                 telemetry.update();
                 previousA = a;
                 idle();
@@ -214,9 +215,10 @@ public class TurretAimTest extends LinearOpMode {
         return reset;
     }
 
-    private void addTelemetry(Pose2D pose, String state, double power, double velocity) {
+    private void addTelemetry(Pose2D pose, String state, double power, double velocity, double target) {
         telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
-        telemetry.addLine("LB: turret + | RB: turret - | Both: stop | X: absolute +90 | B: cancel/clear fault");
+        telemetry.addLine("LB: turret + | RB: turret - | Both: stop/clear fault");
+        telemetry.addLine("Absolute targets: X +90 | Y 0 | B -90 | Release/re-press any command to retry a fault");
         telemetry.addLine("A: reset odometry X/Y | P/D/F editable live in Panels");
         telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
         telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
@@ -234,8 +236,8 @@ public class TurretAimTest extends LinearOpMode {
                 90.0 * ENCODER_TICKS_PER_REVOLUTION * ENCODER_REVOLUTIONS_PER_TURRET_DEGREE);
         telemetry.addData("Encoder tracking", encoderMovementSeen
                 ? "Count changes detected" : "No count changes detected since INIT");
-        telemetry.addData("Turret LB / RB / X inputs", "%b / %b / %b",
-                gamepad1.left_bumper, gamepad1.right_bumper, gamepad1.x);
+        telemetry.addData("Turret LB / RB / X / Y / B inputs", "%b / %b / %b / %b / %b",
+                gamepad1.left_bumper, gamepad1.right_bumper, gamepad1.x, gamepad1.y, gamepad1.b);
         telemetry.addLine("Control state does not gate encoder tracking; readings update even while Idle.");
         if (deltaEncoderTicks == 0) {
             telemetry.addLine("If raw ticks stay fixed WHILE MOVING, check Expansion Hub port 0 / encoder cable.");
@@ -243,7 +245,7 @@ public class TurretAimTest extends LinearOpMode {
         telemetry.addData("Zero magnet detected / reset count", "%b / %d", magnetDetected, magnetResetCount);
         telemetry.addData("Zero reference", magnetZeroEstablished ? "Magnet" : "Straight-ahead INIT (provisional)");
         telemetry.addData("Turret state", state);
-        telemetry.addData("Turret target / limits (degrees)", "+90 / +/-180 (inward recovery allowed)");
+        telemetry.addData("Turret target / limits (degrees)", "%.0f / +/-180 (inward recovery allowed)", target);
         telemetry.addData("Turret velocity (deg/s)", "%.4f", velocity);
         telemetry.addData("Turret power (both servos)", "%.3f", power);
         telemetry.addData("P / D / F", "%.5f / %.5f / %.5f", TURRET_P, TURRET_D, TURRET_F);

@@ -1,9 +1,9 @@
 package org.firstinspires.ftc.teamcode;
 
-/** Standalone regression checks: compile/run with javac/java, no Android hardware needed. */
+/** Standalone command-sequence regressions: javac/java, no Android hardware needed. */
 public final class TurretAimControllerTest {
     private static final TurretAimController.Settings SETTINGS =
-            new TurretAimController.Settings(0.02, 0.001, 0.05, 1.0, 0.2, 1.0, 10.0);
+            new TurretAimController.Settings(0.02, 0.001, 0.05, 1, 0.2, 1, 10);
     private static int checks;
 
     private static void expect(boolean condition, String message) {
@@ -11,108 +11,182 @@ public final class TurretAimControllerTest {
         if (!condition) throw new AssertionError(message);
     }
 
-    private static double step(TurretAimController c, double angle, long ticks, double now,
-                               boolean lb, boolean rb, boolean x, boolean b) {
-        return c.update(angle, ticks, now, lb, rb, x, b, SETTINGS);
+    private static final class Rig {
+        final TurretAimController controller;
+        double now;
+        TurretAimController.Settings settings = SETTINGS;
+
+        Rig() {
+            this(false, false, false);
+        }
+
+        Rig(boolean x, boolean y, boolean b) {
+            controller = new TurretAimController(x, y, b);
+        }
+
+        double step(double angle, boolean lb, boolean rb, boolean x, boolean y, boolean b) {
+            now += 0.05;
+            return controller.update(angle, Math.round(angle * 8192 * 3.75 / 360), now,
+                    lb, rb, x, y, b, settings);
+        }
+
+        double idle(double angle) {
+            return step(angle, false, false, false, false, false);
+        }
+
+        double target(double angle, int target) {
+            return step(angle, false, false, target == 90, target == 0, target == -90);
+        }
+
+        void reached(double angle) {
+            expect(idle(angle) == 0, "Stop at target " + angle);
+            now += 0.2;
+            expect(idle(angle) == 0, "Remain stopped while settling at " + angle);
+            expect(controller.getState().contains("Reached"), "Complete target " + angle);
+        }
     }
 
     public static void main(String[] args) {
-        TurretAimController c = new TurretAimController(false);
-        expect(step(c, 0, 0, 0, true, false, false, false) == 0.2, "LB positive");
-        expect(step(c, 0, 0, 0.01, false, true, false, false) == -0.2, "RB negative");
-        expect(step(c, 0, 0, 0.02, true, true, false, false) == 0, "Both bumpers stop");
-        expect(step(c, 0, 0, 0.03, false, false, false, false) == 0, "Release stops");
+        Rig r = new Rig();
+        expect(r.step(0, true, false, false, false, false) == 0.2, "LB positive");
+        expect(r.step(1, false, true, false, false, false) == -0.2, "RB negative");
+        expect(r.step(0, true, true, false, false, false) == 0, "Both bumpers stop");
+        expect(r.idle(0) == 0, "Release remains stopped");
 
-        c = new TurretAimController(false);
-        expect(step(c, 180, 1000, 0, true, false, false, false) == 0, "+180 blocks outward");
-        expect(step(c, 180, 1000, 0.01, false, true, false, false) < 0, "+180 permits inward");
-        expect(step(c, -180, -1000, 0.02, false, true, false, false) == 0, "-180 blocks outward");
-        expect(step(c, -180, -1000, 0.03, true, false, false, false) > 0, "-180 permits inward");
-        expect(step(c, 181, 1100, 0.04, true, false, false, false) == 0, "Overtravel still blocked");
-        expect(step(c, -181, -1100, 0.05, false, true, false, false) == 0, "Negative overtravel blocked");
+        // Use the same controller for repeated X/Y/B moves, alternating with manual
+        // movement and overshoot corrections, to catch one-shot completion state.
+        r = new Rig();
+        for (int cycle = 0; cycle < 3; cycle++) {
+            expect(r.target(0, 90) > 0, "X starts positive move, cycle " + cycle);
+            expect(r.idle(45) > 0, "X move continues after button release");
+            r.reached(90);
+            expect(r.step(90, true, false, false, false, false) == 0.2, "LB works after auto completion");
+            expect(r.idle(95) == 0, "Manual release does not resume auto");
+            expect(r.target(95, 90) < 0, "X repeats and corrects from above 90");
+            r.reached(90);
+            expect(r.target(90, 0) < 0, "Y goes from positive angle to zero");
+            expect(r.idle(45) < 0, "Y continues after release");
+            r.controller.rebase(0, 0, r.now); // Physical magnet corrects zero.
+            r.reached(0);
+            expect(r.target(0, -90) < 0, "B starts negative move");
+            expect(r.idle(-45) < 0, "B continues after release");
+            r.reached(-90);
+            expect(r.step(-90, false, true, false, false, false) == -0.2, "RB works after negative move");
+            expect(r.idle(-95) == 0, "RB release stops");
+            expect(r.target(-95, -90) > 0, "B repeats and corrects from below -90");
+            r.reached(-90);
+            expect(r.target(-90, 0) > 0, "Y repeats from negative angle");
+            r.reached(0);
+        }
 
-        c = new TurretAimController(false);
-        expect(step(c, 0, 0, 0, false, false, true, false) > 0, "X starts auto");
-        expect(step(c, 20, 100, 0.1, false, true, false, false) < 0, "Manual overrides auto");
-        expect(step(c, 20, 100, 0.2, false, false, false, false) == 0, "Manual release does not resume auto");
+        r = new Rig();
+        expect(r.target(0, 90) > 0, "Start active X move");
+        expect(r.target(10, -90) < 0, "B replaces active X target");
+        expect(r.controller.getTargetDegrees() == -90, "Negative target recorded");
+        expect(r.target(-10, 0) > 0, "Y replaces active B target");
+        expect(r.controller.getTargetDegrees() == 0, "Center target recorded");
+        expect(r.step(-5, false, true, false, false, false) < 0, "Manual overrides active Y move");
+        expect(r.idle(-6) == 0, "Manual release leaves auto cancelled");
 
-        c = new TurretAimController(false);
-        expect(step(c, 100, 1000, 0, false, false, true, false) < 0, "X corrects from above 90");
-        step(c, 90, 900, 0.1, false, false, false, false);
-        step(c, 90, 900, 0.3, false, false, false, false);
-        expect(c.getState().contains("Reached"), "90 settles and completes");
-        expect(step(c, 90, 900, 0.4, false, true, false, false) < 0, "Can move away after completion");
-        step(c, 0, 0, 0.5, false, false, false, false);
-        expect(step(c, 0, 0, 0.6, false, false, true, false) > 0, "Second X repeats 90 move");
+        for (int target : new int[]{90, 0, -90}) {
+            r = new Rig(target == 90, target == 0, target == -90);
+            expect(r.target(20, target) == 0, "Target held at START does not trigger: " + target);
+            r.idle(20);
+            expect(r.target(20, target) != 0, "Release/re-press triggers: " + target);
+            r.step(20, true, true, target == 90, target == 0, target == -90);
+            expect(r.target(20, target) == 0, "Held target does not restart after cancel: " + target);
+            r.idle(20);
+            expect(r.target(20, target) != 0, "Target can restart after cancel: " + target);
+        }
 
-        c = new TurretAimController(false);
-        step(c, -10, -100, 0, false, false, true, false);
-        c.rebase(0, 0, 0.2); // Magnet changed angle/count reference during an active move.
-        expect(step(c, 0, 0, 0.2, false, false, false, false) > 0, "Magnet rebase preserves auto");
-        expect(c.getVelocity() == 0, "Magnet rebase removes D spike");
-        expect(!c.getState().contains("FAULT"), "Magnet rebase is not a direction fault");
+        // A fault stops the current attempt, but never permanently disables input.
+        // Keep the same input held to prove that it cannot continually retry itself.
+        r = new Rig();
+        r.step(0, true, false, false, false, false);
+        r.now += 1.1;
+        expect(r.step(0, true, false, false, false, false) == 0, "Manual stall stops");
+        expect(r.controller.getState().contains("FAULT"), "Stall fault reported");
+        expect(r.step(0, true, false, false, false, false) == 0, "Held LB cannot restart stalled attempt");
+        r.idle(0);
+        expect(r.step(0, true, false, false, false, false) > 0, "Fresh LB recovers from fault");
+        expect(!r.controller.getState().contains("FAULT"), "Fresh LB clears old fault");
+        r.now += 1.1;
+        r.step(0, true, false, false, false, false);
+        expect(r.step(0, false, true, false, false, false) < 0, "Fresh RB can recover in opposite direction");
 
-        c = new TurretAimController(false);
-        step(c, 0, 0, 0, true, false, false, false);
-        expect(step(c, 0, 0, 1.1, true, false, false, false) == 0, "Stalled manual stops");
-        expect(c.getState().contains("FAULT"), "Stall fault shown");
-        expect(step(c, 0, 0, 1.2, false, false, true, false) == 0, "X cannot override fault");
-        expect(step(c, 0, 0, 1.3, true, false, false, true) == 0, "B clears and stops even with LB");
-        expect(step(c, 0, 0, 1.4, false, false, true, false) > 0, "X works after fault cleared");
+        for (int target : new int[]{90, 0, -90}) {
+            r = new Rig();
+            double angle = target == 0 ? 30 : 0;
+            r.target(angle, target);
+            r.now += 1.1;
+            expect(r.target(angle, target) == 0, "Stalled target stops: " + target);
+            expect(r.controller.getState().contains("FAULT"), "Target stall reported: " + target);
+            expect(r.target(angle, target) == 0, "Held target cannot retry fault: " + target);
+            r.idle(angle);
+            expect(r.target(angle, target) != 0, "Fresh target retries fault: " + target);
+        }
 
-        c = new TurretAimController(false);
-        step(c, 0, 0, 0, true, false, false, false);
-        expect(step(c, -1, -100, 0.2, true, false, false, false) == 0, "Wrong encoder sign stops");
-        expect(c.getState().contains("direction"), "Wrong sign diagnosed");
+        r = new Rig();
+        r.step(0, true, false, false, false, false);
+        r.now += 0.2;
+        expect(r.step(-1, true, false, false, false, false) == 0, "Wrong sign stops attempt");
+        expect(r.controller.getState().contains("direction"), "Wrong sign diagnosed");
+        expect(r.step(-1, true, true, true, true, true) == 0, "Both bumpers take priority and stop");
+        expect(!r.controller.getState().contains("FAULT"), "Both bumpers clear fault");
+        expect(r.idle(-1) == 0, "Clearing fault never restarts movement");
+        expect(r.target(-1, 90) > 0, "X available after fault cancellation");
 
-        c = new TurretAimController(true);
-        expect(step(c, 0, 0, 0, false, false, true, false) == 0, "X held at START does not trigger");
-        step(c, 0, 0, 0.1, false, false, false, false);
-        expect(step(c, 0, 0, 0.2, false, false, true, false) > 0, "Released/repressed X triggers");
-        expect(step(c, 10, 100, 0.3, false, false, true, true) == 0, "B cancels auto");
-        expect(step(c, 10, 100, 0.4, false, false, true, false) == 0, "Holding X after B does not restart");
+        r = new Rig();
+        expect(r.step(180, true, false, false, false, false) == 0, "+180 blocks outward");
+        expect(r.step(180, false, true, false, false, false) < 0, "+180 permits inward");
+        expect(r.step(-180, false, true, false, false, false) == 0, "-180 blocks outward");
+        expect(r.step(-180, true, false, false, false, false) > 0, "-180 permits inward");
+        expect(r.step(181, true, false, false, false, false) == 0, "Retry cannot bypass positive limit");
+        expect(r.step(-181, false, true, false, false, false) == 0, "Retry cannot bypass negative limit");
+        expect(r.target(-181, 90) > 0, "Automatic target can recover inward from negative limit");
+        expect(r.target(181, -90) < 0, "Automatic target can recover inward from positive limit");
 
-        c = new TurretAimController(false);
-        TurretAimController.Settings capped = new TurretAimController.Settings(2, 0, 0.1, 0.3, 0.8, 1.0, 10.0);
-        expect(c.update(0, 0, 0, false, false, true, false, capped) == 0.3, "Auto power capped");
-        expect(c.update(0, 0, 0.1, false, true, false, false, capped) == -0.3, "Manual power capped");
-        TurretAimController.Settings invalid = new TurretAimController.Settings(Double.NaN, 0, 0, 1, 0.2, 1, 10);
-        expect(c.update(0, 0, 0.2, true, false, false, false, invalid) == 0, "Invalid gains stop turret");
+        for (int target : new int[]{90, 0, -90}) {
+            for (int direction : new int[]{-1, 1}) {
+                r = new Rig();
+                r.settings = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 10);
+                expect(r.target(target - direction * 10.1, target) == direction * 0.7,
+                        "Bang-bang outside range, target " + target + ", direction " + direction);
+                expect(r.controller.getState().contains("Bang-bang"), "Bang-bang phase reported");
+                r = new Rig();
+                r.settings = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 10);
+                expect(r.target(target - direction * 10, target) == direction * 0.25,
+                        "PDF at boundary, target " + target + ", direction " + direction);
+                expect(r.controller.getState().contains("PDF"), "PDF phase reported");
+            }
+        }
 
-        TurretAimController.Settings hybrid = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 10);
-        c = new TurretAimController(false);
-        expect(c.update(79.9, 0, 0, false, false, true, false, hybrid) == 0.7,
-                "Outside positive approach uses bang-bang power");
-        expect(c.getState().contains("Bang-bang"), "Bang-bang phase reported");
-        c = new TurretAimController(false);
-        expect(c.update(80, 0, 0, false, false, true, false, hybrid) == 0.25,
-                "Exactly 10 degrees remaining switches to PDF");
-        expect(c.getState().contains("PDF"), "PDF phase reported");
-        c = new TurretAimController(false);
-        expect(c.update(100.1, 0, 0, false, false, true, false, hybrid) == -0.7,
-                "Negative approach outside range uses negative bang-bang");
-        c = new TurretAimController(false);
-        expect(c.update(100, 0, 0, false, false, true, false, hybrid) == -0.25,
-                "Negative approach at boundary switches to PDF");
+        r = new Rig();
+        r.settings = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 5);
+        expect(r.target(84, 90) == 0.7, "Editable range keeps bang-bang at 6 degree error");
+        r.settings = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 10);
+        expect(Math.abs(r.idle(84) - 0.17) < 1e-9, "Live range change switches active move to PDF");
 
-        TurretAimController.Settings narrow = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 5);
-        c = new TurretAimController(false);
-        expect(c.update(84, 0, 0, false, false, true, false, narrow) == 0.7,
-                "Editable 5 degree range keeps bang-bang at 6 degrees error");
-        expect(Math.abs(c.update(84, 0, 0.01, false, false, false, false, hybrid) - 0.17) < 1e-9,
-                "Live range change switches active move to PDF");
-        expect(c.update(84, 0, 0.02, false, false, false, true, hybrid) == 0,
-                "Cancel still stops hybrid move");
+        r = new Rig();
+        r.target(-20, 90);
+        r.controller.rebase(0, 0, r.now);
+        expect(r.idle(0) > 0, "Magnet rebase preserves active target");
+        expect(r.controller.getVelocity() == 0, "Magnet rebase prevents derivative spike");
+        expect(!r.controller.getState().contains("FAULT"), "Magnet rebase avoids false direction fault");
 
-        c = new TurretAimController(false);
-        TurretAimController.Settings invalidRange = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, -1);
-        expect(c.update(0, 0, 0, false, false, true, false, invalidRange) == 0,
-                "Negative PDF range stops turret");
-        c = new TurretAimController(false);
-        TurretAimController.Settings invalidBangBang = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, Double.NaN, 10);
-        expect(c.update(0, 0, 0, false, false, true, false, invalidBangBang) == 0,
-                "Invalid bang-bang power stops turret");
-
+        r = new Rig();
+        r.settings = new TurretAimController.Settings(2, 0, 0.1, 0.3, 0.8, 1, 10);
+        expect(r.target(0, 90) == 0.3, "Bang-bang capped");
+        expect(r.step(0, false, true, false, false, false) == -0.3, "Manual capped");
+        for (TurretAimController.Settings invalid : new TurretAimController.Settings[]{
+                new TurretAimController.Settings(Double.NaN, 0, 0, 1, 0.2, 1, 10),
+                new TurretAimController.Settings(0.02, 0, 0, 1, 0.2, 1, -1),
+                new TurretAimController.Settings(0.02, 0, 0, 1, 0.2, Double.NaN, 10)}) {
+            r = new Rig();
+            r.settings = invalid;
+            expect(r.target(0, 90) == 0, "Invalid settings stop automatic movement");
+            expect(r.step(0, true, false, false, false, false) == 0, "Fresh manual cannot bypass invalid settings");
+        }
         System.out.println("Passed " + checks + " turret controller regression checks.");
     }
 }

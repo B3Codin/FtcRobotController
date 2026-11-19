@@ -2,7 +2,6 @@ package org.firstinspires.ftc.teamcode;
 
 /** Hardware-independent turret control. Positive power must increase signed encoder ticks. */
 final class TurretAimController {
-    static final double TARGET_DEGREES = 90.0;
     static final double LIMIT_DEGREES = 180.0;
     private static final double ANGLE_TOLERANCE_DEGREES = 0.5;
     private static final double SETTLE_SECONDS = 0.15;
@@ -35,8 +34,9 @@ final class TurretAimController {
         }
     }
 
-    private boolean previousX;
+    private boolean previousX, previousY, previousB, previousLb, previousRb;
     private boolean automatic;
+    private double targetDegrees = 90.0;
     private String fault;
     private String state = "Idle";
     private double lastAngle = Double.NaN;
@@ -48,8 +48,10 @@ final class TurretAimController {
     private double directionStarted;
     private double settledSince = Double.NaN;
 
-    TurretAimController(boolean xInitiallyHeld) {
+    TurretAimController(boolean xInitiallyHeld, boolean yInitiallyHeld, boolean bInitiallyHeld) {
         previousX = xInitiallyHeld;
+        previousY = yInitiallyHeld;
+        previousB = bInitiallyHeld;
     }
 
     /** Rebase after the magnet changes zero, without cancelling the requested move. */
@@ -59,13 +61,22 @@ final class TurretAimController {
         velocity = 0.0;
         progressTicks = ticks;
         progressTime = now;
+        directionStarted = now;
+        power = 0.0;
         settledSince = Double.NaN;
     }
 
     double update(double angle, long ticks, double now, boolean lb, boolean rb,
-                  boolean x, boolean b, Settings settings) {
+                  boolean x, boolean y, boolean b, Settings settings) {
         boolean xPressed = x && !previousX;
+        boolean yPressed = y && !previousY;
+        boolean bPressed = b && !previousB;
+        boolean manualPressed = (lb && !previousLb) || (rb && !previousRb);
         previousX = x;
+        previousY = y;
+        previousB = b;
+        previousLb = lb;
+        previousRb = rb;
         if (!settings.valid() || !Double.isFinite(angle) || !Double.isFinite(now)) {
             fault = "Invalid control settings or encoder angle";
             automatic = false;
@@ -83,48 +94,54 @@ final class TurretAimController {
         lastAngle = angle;
         lastTime = now;
 
-        // B has priority over all commands. A released/re-pressed X is required to restart.
-        if (b) {
+        // Both bumpers stop and clear faults, with priority over target buttons.
+        if (lb && rb) {
             automatic = false;
             fault = null;
             state = "Cancelled / fault cleared";
             settledSince = Double.NaN;
             return stop(ticks, now);
         }
-        if (fault != null) {
-            automatic = false;
-            return stop(ticks, now);
-        }
         if (lb || rb) {
             automatic = false;
             settledSince = Double.NaN;
-            state = lb && rb ? "Both bumpers: stopped" : "Manual";
-        } else if (xPressed) {
+            if (manualPressed) startCommand(angle, ticks, now);
+            state = lb ? "Manual positive" : "Manual negative";
+        } else if (xPressed || yPressed || bPressed) {
+            // Each fresh press replaces the previous target and restarts all motion
+            // history. Prefer center if multiple target buttons are pressed together.
+            targetDegrees = yPressed ? 0.0 : xPressed ? 90.0 : -90.0;
+            startCommand(angle, ticks, now);
             automatic = true;
-            settledSince = Double.NaN;
-            state = "Aiming at +90 degrees";
+            state = "Aiming at " + targetDegrees + " degrees";
+        }
+        // A held input cannot keep retrying a stall or direction fault. Release and
+        // press a command again to retry; every attempt still obeys travel limits.
+        if (fault != null) {
+            automatic = false;
+            return stop(ticks, now);
         }
 
         double requested = 0.0;
         if (lb != rb) {
             requested = lb ? settings.manualPower : -settings.manualPower;
         } else if (automatic) {
-            double error = TARGET_DEGREES - angle;
+            double error = targetDegrees - angle;
             if (Math.abs(error) <= ANGLE_TOLERANCE_DEGREES) {
                 if (Double.isNaN(settledSince)) settledSince = now;
                 if (now - settledSince >= SETTLE_SECONDS) {
                     automatic = false;
-                    state = "Reached +90 degrees";
+                    state = "Reached " + targetDegrees + " degrees";
                 } else {
-                    state = "Settling at +90 degrees";
+                    state = "Settling at " + targetDegrees + " degrees";
                 }
             } else {
                 settledSince = Double.NaN;
                 if (Math.abs(error) > settings.pdfRangeDegrees) {
-                    state = "Bang-bang to +90 degrees";
+                    state = "Bang-bang to " + targetDegrees + " degrees";
                     requested = settings.bangBangPower * Math.signum(error);
                 } else {
-                    state = "PDF to +90 degrees";
+                    state = "PDF to " + targetDegrees + " degrees";
                     requested = settings.p * error - settings.d * velocity
                             + settings.f * Math.signum(error);
                 }
@@ -173,8 +190,17 @@ final class TurretAimController {
         return 0.0;
     }
 
+    private void startCommand(double angle, long ticks, double now) {
+        fault = null;
+        rebase(angle, ticks, now);
+    }
+
     String getState() {
-        return fault == null ? state : "FAULT: " + fault + " (B clears)";
+        return fault == null ? state : "FAULT: " + fault + " (release/re-press command to retry)";
+    }
+
+    double getTargetDegrees() {
+        return targetDegrees;
     }
 
     double getVelocity() {
