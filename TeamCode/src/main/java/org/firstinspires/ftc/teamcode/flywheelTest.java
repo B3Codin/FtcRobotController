@@ -5,13 +5,12 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigurationType;
 
 /** Runs each flywheel motor at its own target RPM while gamepad1 A is held. */
 @TeleOp(name = "flywheelTest", group = "Tuning")
 public class flywheelTest extends LinearOpMode {
-    private static final double FRONT_MAX_RPM = PIDTuning.FRONT_MOTOR_MAX_RPM * PIDTuning.FLYWHEEL_RATIO;
-    private static final double BACK_MAX_RPM = PIDTuning.BACK_MOTOR_MAX_RPM * PIDTuning.FLYWHEEL_RATIO;
-    private static final double FRONT_TARGET_RPM = -FRONT_MAX_RPM;
+    private static final double FRONT_TARGET_RPM = -1200;
     private static final double BACK_TARGET_RPM = -1500;
     private static final double RPM_STEP = 100.0;
     private static final DcMotor.Direction FRONT_DIRECTION = DcMotor.Direction.FORWARD;
@@ -25,8 +24,8 @@ public class flywheelTest extends LinearOpMode {
         double backTargetRPM = BACK_TARGET_RPM;
 
         try {
-            PIDTuning.configureMotor(front, FRONT_DIRECTION, PIDTuning.FRONT_MOTOR_MAX_RPM);
-            PIDTuning.configureMotor(back, BACK_DIRECTION, PIDTuning.BACK_MOTOR_MAX_RPM);
+            configureMotor(front, FRONT_DIRECTION);
+            configureMotor(back, BACK_DIRECTION);
 
             // Capture each motor's separate P/F gains from the tuner at INIT.
             PIDFCoefficients frontGains = configureGains(front, PIDTuning.FRONT_P, PIDTuning.FRONT_F);
@@ -38,7 +37,6 @@ public class flywheelTest extends LinearOpMode {
             telemetry.setMsTransmissionInterval(100);
             showControls();
             telemetry.addData("flyFront / flyBack target RPM", "%.0f / %.0f", frontTargetRPM, backTargetRPM);
-            telemetry.addData("flyFront / flyBack maximum RPM", "%.0f / %.0f", FRONT_MAX_RPM, BACK_MAX_RPM);
             telemetry.addData("flyFront P / F from PIDTuning", "%.4f / %.4f", frontGains.p, frontGains.f);
             telemetry.addData("flyBack P / F from PIDTuning", "%.4f / %.4f", backGains.p, backGains.f);
             telemetry.update();
@@ -53,8 +51,8 @@ public class flywheelTest extends LinearOpMode {
                 if (down && !previousDown) frontChange -= RPM_STEP;
                 if (y && !previousY) backChange += RPM_STEP;
                 if (x && !previousX) backChange -= RPM_STEP;
-                frontTargetRPM = adjustedRPM(frontTargetRPM, frontChange, FRONT_MAX_RPM);
-                backTargetRPM = adjustedRPM(backTargetRPM, backChange, BACK_MAX_RPM);
+                frontTargetRPM = adjustedRPM(frontTargetRPM, frontChange);
+                backTargetRPM = adjustedRPM(backTargetRPM, backChange);
                 previousUp = up;
                 previousDown = down;
                 previousY = y;
@@ -86,7 +84,8 @@ public class flywheelTest extends LinearOpMode {
         }
     }
 
-    private static double adjustedRPM(double targetRPM, double speedChange, double maxRPM) {
+    private static double adjustedRPM(double targetRPM, double speedChange) {
+        double maxRPM = PIDTuning.MOTOR_MAX_RPM * PIDTuning.FLYWHEEL_RATIO;
         double speed = Math.max(0.0, Math.min(maxRPM, Math.abs(targetRPM) + speedChange));
         // Preserve the motor's spin direction, including when slowed all the way to zero.
         return Math.copySign(speed, targetRPM);
@@ -107,5 +106,17 @@ public class flywheelTest extends LinearOpMode {
         }
         motor.setVelocityPIDFCoefficients(p, 0.0, 0.0, f);
         return new PIDFCoefficients(p, 0.0, 0.0, f);
+    }
+
+    private static void configureMotor(DcMotorEx motor, DcMotor.Direction direction) {
+        motor.setPower(0.0);
+        motor.setDirection(direction);
+        motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        MotorConfigurationType type = motor.getMotorType().clone();
+        type.setMaxRPM(PIDTuning.MOTOR_MAX_RPM);
+        type.setTicksPerRev(PIDTuning.MOTOR_TICKS_PER_REV);
+        type.setGearing(1.0);
+        motor.setMotorType(type);
+        motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
     }
 }

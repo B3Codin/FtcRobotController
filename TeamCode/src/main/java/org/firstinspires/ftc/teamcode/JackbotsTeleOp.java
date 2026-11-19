@@ -17,7 +17,8 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 @TeleOp(name = "JackbotsTeleOp")
 public class JackbotsTeleOp extends LinearOpMode {
     // EDIT THESE VALUES: flywheel setpoints, turret power, intake positions, and gains.
-    private static final double FLY_FRONT_TARGET_RPM = -1500.0;
+    // Start below the front motor's 1150 RPM no-load rating to allow for load.
+    private static final double FLY_FRONT_TARGET_RPM = -1000.0;
     private static final double FLY_BACK_TARGET_RPM = -2100.0;
 
     // Turret power magnitude (0.0-1.0): LB applies positive, RB applies negative.
@@ -29,17 +30,20 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double INTAKE_LEFT_DOWN_POSITION = 0.64;
     private static final double INTAKE_RIGHT_DOWN_POSITION = 0.46;
 
-    // Separate REV Hub velocity gains for each flywheel, matching PIDTuning.
-    // F is an initial estimate for the 6000 RPM / 28 ticks-per-revolution motors.
+    // Separate REV Hub velocity gains for each flywheel.
     // Copy your tuned P and F here. I and D are held at zero.
     private static final double FLY_FRONT_P = 100;
     private static final double FLY_FRONT_F = 10.547;
     private static final double FLY_BACK_P = 100;
     private static final double FLY_BACK_F = 11.211;
 
-    // Match the motor specifications used in PIDTuning and flywheelTest.
-    private static final double FLYWHEEL_MOTOR_MAX_RPM = 6000.0;
-    private static final double FLYWHEEL_TICKS_PER_REV = 28.0;
+    // goBILDA Yellow Jacket front gearbox ratio (nominally 5.2:1).
+    private static final double FLY_FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
+    private static final double FLY_FRONT_MOTOR_MAX_RPM = 1150.0;
+    private static final double FLY_BACK_MOTOR_GEARING = 1.0;
+    private static final double FLY_BACK_MOTOR_MAX_RPM = 6000.0;
+    private static final double FLYWHEEL_TICKS_PER_MOTOR_REV = 28.0;
+    // Flywheel revolutions per gearbox output revolution.
     private static final double FLYWHEEL_RATIO = 1.0;
     private static final double HEADING_OFFSET_DEGREES = 0.0;
     // Matches the tested direction in RollerTest; the right motor is reversed.
@@ -86,8 +90,10 @@ public class JackbotsTeleOp extends LinearOpMode {
             configurePowerMotor(backRight, DcMotor.Direction.REVERSE);
             configurePowerMotor(rollLeft, DcMotor.Direction.FORWARD);
             configurePowerMotor(rollRight, DcMotor.Direction.REVERSE);
-            configureFlywheel(flyFront, FLY_FRONT_P, FLY_FRONT_F);
-            configureFlywheel(flyBack, FLY_BACK_P, FLY_BACK_F);
+            configureFlywheel(flyFront, FLY_FRONT_MOTOR_MAX_RPM, FLY_FRONT_MOTOR_GEARING,
+                    FLY_FRONT_P, FLY_FRONT_F);
+            configureFlywheel(flyBack, FLY_BACK_MOTOR_MAX_RPM, FLY_BACK_MOTOR_GEARING,
+                    FLY_BACK_P, FLY_BACK_F);
             configurePinpoint();
 
             telemetry.setMsTransmissionInterval(100);
@@ -121,7 +127,9 @@ public class JackbotsTeleOp extends LinearOpMode {
             boolean flywheelsEnabled = false;
             // Match the down positions commanded at START. First Y press goes UP.
             boolean intakeUp = false;
-            double ticksPerSecondPerRPM = FLYWHEEL_TICKS_PER_REV
+            double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
+                    / (60.0 * FLYWHEEL_RATIO);
+            double backTicksPerSecondPerRPM = flyBack.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
 
             while (opModeIsActive()) {
@@ -177,8 +185,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                     flywheelsEnabled = !flywheelsEnabled;
                 }
                 if (flywheelsEnabled) {
-                    flyFront.setVelocity(FLY_FRONT_TARGET_RPM * ticksPerSecondPerRPM);
-                    flyBack.setVelocity(FLY_BACK_TARGET_RPM * ticksPerSecondPerRPM);
+                    flyFront.setVelocity(FLY_FRONT_TARGET_RPM * frontTicksPerSecondPerRPM);
+                    flyBack.setVelocity(FLY_BACK_TARGET_RPM * backTicksPerSecondPerRPM);
                 } else {
                     flyFront.setPower(0.0);
                     flyBack.setPower(0.0);
@@ -199,8 +207,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 telemetry.addData("Turret commanded power (both servos)", "%.2f", turretPower);
                 telemetry.addData("flyFront Target rpm", "%.0f", FLY_FRONT_TARGET_RPM);
                 telemetry.addData("flyBack Target rpm", "%.0f", FLY_BACK_TARGET_RPM);
-                telemetry.addData("flyFront rpm", "%.1f", flyFront.getVelocity() / ticksPerSecondPerRPM);
-                telemetry.addData("flyBack rpm", "%.1f", flyBack.getVelocity() / ticksPerSecondPerRPM);
+                telemetry.addData("flyFront rpm", "%.1f", flyFront.getVelocity() / frontTicksPerSecondPerRPM);
+                telemetry.addData("flyBack rpm", "%.1f", flyBack.getVelocity() / backTicksPerSecondPerRPM);
                 telemetry.update();
 
                 previousA = a;
@@ -224,14 +232,15 @@ public class JackbotsTeleOp extends LinearOpMode {
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
     }
 
-    private static void configureFlywheel(DcMotorEx motor, double p, double f) {
+    private static void configureFlywheel(DcMotorEx motor, double maxRPM, double gearing,
+                                          double p, double f) {
         motor.setPower(0.0);
         motor.setDirection(DcMotor.Direction.FORWARD);
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         MotorConfigurationType type = motor.getMotorType().clone();
-        type.setMaxRPM(FLYWHEEL_MOTOR_MAX_RPM);
-        type.setTicksPerRev(FLYWHEEL_TICKS_PER_REV);
-        type.setGearing(1.0);
+        type.setMaxRPM(maxRPM);
+        type.setTicksPerRev(FLYWHEEL_TICKS_PER_MOTOR_REV * gearing);
+        type.setGearing(gearing);
         motor.setMotorType(type);
         motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         motor.setVelocityPIDFCoefficients(p, 0.0, 0.0, f);
