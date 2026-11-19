@@ -3,7 +3,7 @@ package org.firstinspires.ftc.teamcode;
 /** Standalone regression checks: compile/run with javac/java, no Android hardware needed. */
 public final class TurretAimControllerTest {
     private static final TurretAimController.Settings SETTINGS =
-            new TurretAimController.Settings(0.02, 0.001, 0.05, 1.0, 0.2);
+            new TurretAimController.Settings(0.02, 0.001, 0.05, 1.0, 0.2, 1.0, 10.0);
     private static int checks;
 
     private static void expect(boolean condition, String message) {
@@ -73,11 +73,45 @@ public final class TurretAimControllerTest {
         expect(step(c, 10, 100, 0.4, false, false, true, false) == 0, "Holding X after B does not restart");
 
         c = new TurretAimController(false);
-        TurretAimController.Settings capped = new TurretAimController.Settings(2, 0, 0.1, 0.3, 0.8);
+        TurretAimController.Settings capped = new TurretAimController.Settings(2, 0, 0.1, 0.3, 0.8, 1.0, 10.0);
         expect(c.update(0, 0, 0, false, false, true, false, capped) == 0.3, "Auto power capped");
         expect(c.update(0, 0, 0.1, false, true, false, false, capped) == -0.3, "Manual power capped");
-        TurretAimController.Settings invalid = new TurretAimController.Settings(Double.NaN, 0, 0, 1, 0.2);
+        TurretAimController.Settings invalid = new TurretAimController.Settings(Double.NaN, 0, 0, 1, 0.2, 1, 10);
         expect(c.update(0, 0, 0.2, true, false, false, false, invalid) == 0, "Invalid gains stop turret");
+
+        TurretAimController.Settings hybrid = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 10);
+        c = new TurretAimController(false);
+        expect(c.update(79.9, 0, 0, false, false, true, false, hybrid) == 0.7,
+                "Outside positive approach uses bang-bang power");
+        expect(c.getState().contains("Bang-bang"), "Bang-bang phase reported");
+        c = new TurretAimController(false);
+        expect(c.update(80, 0, 0, false, false, true, false, hybrid) == 0.25,
+                "Exactly 10 degrees remaining switches to PDF");
+        expect(c.getState().contains("PDF"), "PDF phase reported");
+        c = new TurretAimController(false);
+        expect(c.update(100.1, 0, 0, false, false, true, false, hybrid) == -0.7,
+                "Negative approach outside range uses negative bang-bang");
+        c = new TurretAimController(false);
+        expect(c.update(100, 0, 0, false, false, true, false, hybrid) == -0.25,
+                "Negative approach at boundary switches to PDF");
+
+        TurretAimController.Settings narrow = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 5);
+        c = new TurretAimController(false);
+        expect(c.update(84, 0, 0, false, false, true, false, narrow) == 0.7,
+                "Editable 5 degree range keeps bang-bang at 6 degrees error");
+        expect(Math.abs(c.update(84, 0, 0.01, false, false, false, false, hybrid) - 0.17) < 1e-9,
+                "Live range change switches active move to PDF");
+        expect(c.update(84, 0, 0.02, false, false, false, true, hybrid) == 0,
+                "Cancel still stops hybrid move");
+
+        c = new TurretAimController(false);
+        TurretAimController.Settings invalidRange = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, -1);
+        expect(c.update(0, 0, 0, false, false, true, false, invalidRange) == 0,
+                "Negative PDF range stops turret");
+        c = new TurretAimController(false);
+        TurretAimController.Settings invalidBangBang = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, Double.NaN, 10);
+        expect(c.update(0, 0, 0, false, false, true, false, invalidBangBang) == 0,
+                "Invalid bang-bang power stops turret");
 
         System.out.println("Passed " + checks + " turret controller regression checks.");
     }

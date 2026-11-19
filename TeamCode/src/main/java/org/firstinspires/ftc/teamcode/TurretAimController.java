@@ -9,20 +9,25 @@ final class TurretAimController {
     private static final double STALL_SECONDS = 1.0;
 
     static final class Settings {
-        final double p, d, f, maxPower, manualPower;
+        final double p, d, f, maxPower, manualPower, bangBangPower, pdfRangeDegrees;
 
-        Settings(double p, double d, double f, double maxPower, double manualPower) {
+        Settings(double p, double d, double f, double maxPower, double manualPower,
+                 double bangBangPower, double pdfRangeDegrees) {
             this.p = p;
             this.d = d;
             this.f = f;
             this.maxPower = maxPower;
             this.manualPower = manualPower;
+            this.bangBangPower = bangBangPower;
+            this.pdfRangeDegrees = pdfRangeDegrees;
         }
 
         boolean valid() {
             return finiteNonnegative(p) && finiteNonnegative(d) && finiteNonnegative(f)
                     && finiteNonnegative(maxPower) && maxPower > 0.0 && maxPower <= 1.0
-                    && finiteNonnegative(manualPower) && manualPower <= 1.0;
+                    && finiteNonnegative(manualPower) && manualPower <= 1.0
+                    && finiteNonnegative(bangBangPower) && bangBangPower > 0.0 && bangBangPower <= 1.0
+                    && finiteNonnegative(pdfRangeDegrees);
         }
 
         private static boolean finiteNonnegative(double value) {
@@ -115,9 +120,14 @@ final class TurretAimController {
                 }
             } else {
                 settledSince = Double.NaN;
-                state = "Aiming at +90 degrees";
-                requested = settings.p * error - settings.d * velocity
-                        + settings.f * Math.signum(error);
+                if (Math.abs(error) > settings.pdfRangeDegrees) {
+                    state = "Bang-bang to +90 degrees";
+                    requested = settings.bangBangPower * Math.signum(error);
+                } else {
+                    state = "PDF to +90 degrees";
+                    requested = settings.p * error - settings.d * velocity
+                            + settings.f * Math.signum(error);
+                }
             }
         }
         requested = Math.max(-settings.maxPower, Math.min(settings.maxPower, requested));

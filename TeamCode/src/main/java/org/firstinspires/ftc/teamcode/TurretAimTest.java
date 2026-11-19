@@ -42,12 +42,16 @@ public class TurretAimTest extends LinearOpMode {
 
     // Live in Panels. Copy tuned values here to preserve them after a restart.
     // Both CR servos drive the SAME turret, so they share one position controller.
-    // Auto output = P * error(deg) - D * velocity(deg/sec) + F * sign(error).
+    // Auto: fixed bang-bang power outside PDF range, then
+    // P * error(deg) - D * velocity(deg/sec) + F * sign(error) inside the range.
     // F is a constant friction feedforward; there is no integral term.
     public static volatile double TURRET_P = 0.02;
     public static volatile double TURRET_D = 0.001;
     public static volatile double TURRET_F = 0.05;
     public static volatile double TURRET_MAX_POWER = 1.0;
+    public static volatile double TURRET_BANG_BANG_POWER = 1.0;
+    // Switch to PDF when absolute target error is <= this many degrees.
+    public static volatile double TURRET_PDF_RANGE_DEGREES = 10.0;
     // LB/RB use fixed power, bypassing PDF but obeying the same travel/stall checks.
     public static volatile double TURRET_MANUAL_POWER = 0.2;
 
@@ -129,7 +133,8 @@ public class TurretAimTest extends LinearOpMode {
                         gamepad1.right_stick_x);
 
                 TurretAimController.Settings settings = new TurretAimController.Settings(
-                        TURRET_P, TURRET_D, TURRET_F, TURRET_MAX_POWER, TURRET_MANUAL_POWER);
+                        TURRET_P, TURRET_D, TURRET_F, TURRET_MAX_POWER, TURRET_MANUAL_POWER,
+                        TURRET_BANG_BANG_POWER, TURRET_PDF_RANGE_DEGREES);
                 double power = controller.update(turretAngleDegrees(), signedEncoderTicks(), now,
                         gamepad1.left_bumper, gamepad1.right_bumper, gamepad1.x, gamepad1.b, settings);
                 if (ENCODER_SIGN != 1 && ENCODER_SIGN != -1) power = 0.0;
@@ -189,20 +194,14 @@ public class TurretAimTest extends LinearOpMode {
         telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
         telemetry.addLine("LB: turret + | RB: turret - | Both: stop | X: absolute +90 | B: cancel/clear fault");
         telemetry.addLine("A: reset odometry X/Y | P/D/F editable live in Panels");
-        telemetry.addData("Odometry status", odo.getDeviceStatus());
         telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
         telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
         telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
-        telemetry.addData("Encoder source", frontRight.getConnectionInfo());
-        telemetry.addData("Encoder motor port (expected 0)", frontRight.getPortNumber());
         telemetry.addData("Native raw encoder ticks (unzeroed)", rawEncoderTicks);
         telemetry.addData("Raw encoder tick change this loop", deltaEncoderTicks);
         telemetry.addData("Turret encoder ticks (signed, from zero)", signedEncoderTicks());
         telemetry.addData("Encoder revolutions", "%.6f", signedEncoderTicks() / ENCODER_TICKS_PER_REVOLUTION);
         telemetry.addData("Turret angle (degrees)", "%.6f", turretAngleDegrees());
-        telemetry.addData("Counts per turret degree", "%.1f",
-                ENCODER_TICKS_PER_REVOLUTION * ENCODER_REVOLUTIONS_PER_TURRET_DEGREE);
-        telemetry.addLine("Ratio is hypothetical: 3.75 encoder turns PER DEGREE. Verify mechanically.");
         if (deltaEncoderTicks == 0) {
             telemetry.addLine("If raw ticks stay fixed WHILE MOVING, check Expansion Hub port 0 / encoder cable.");
         }
@@ -213,10 +212,9 @@ public class TurretAimTest extends LinearOpMode {
         telemetry.addData("Turret velocity (deg/s)", "%.4f", velocity);
         telemetry.addData("Turret power (both servos)", "%.3f", power);
         telemetry.addData("P / D / F", "%.5f / %.5f / %.5f", TURRET_P, TURRET_D, TURRET_F);
+        telemetry.addData("Bang-bang power / PDF range (deg)", "%.3f / %.2f",
+                TURRET_BANG_BANG_POWER, TURRET_PDF_RANGE_DEGREES);
         telemetry.addData("Manual / max power", "%.3f / %.3f", TURRET_MANUAL_POWER, TURRET_MAX_POWER);
-        if (ENCODER_SIGN != 1 && ENCODER_SIGN != -1) {
-            telemetry.addLine("TURRET DISABLED: ENCODER_SIGN must be +1 or -1.");
-        }
         telemetry.addData("Future field target (m), INACTIVE", "X %.2f / Y %.2f",
                 FIELD_TARGET_X_METERS, FIELD_TARGET_Y_METERS);
     }
