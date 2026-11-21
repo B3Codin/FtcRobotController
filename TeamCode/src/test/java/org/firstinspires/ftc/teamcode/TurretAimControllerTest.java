@@ -34,6 +34,12 @@ public final class TurretAimControllerTest {
             return step(angle, false, false, false, false, false);
         }
 
+        double track(double angle, double target) {
+            now += 0.05;
+            return controller.update(angle, Math.round(angle * 8192 * 3.75 / 360), now,
+                    false, false, false, false, false, settings, true, target);
+        }
+
         double target(double angle, int target) {
             return step(angle, false, false, target == 90, target == 0, target == -90);
         }
@@ -187,6 +193,42 @@ public final class TurretAimControllerTest {
             expect(r.target(0, 90) == 0, "Invalid settings stop automatic movement");
             expect(r.step(0, true, false, false, false, false) == 0, "Fresh manual cannot bypass invalid settings");
         }
+        expect(Math.abs(TurretAimController.fieldTargetDegrees(0, 0, 0, 1, 1, 0, 0) + 45) < 1e-9,
+                "Goal to left requires negative clockwise turret angle");
+        expect(Math.abs(TurretAimController.fieldTargetDegrees(0, 0, Math.PI / 2, 1, 0, 0, 0) - 90) < 1e-9,
+                "Left chassis turn requires right turret turn");
+        expect(Math.abs(TurretAimController.fieldTargetDegrees(0, 1, 0, 1, 1, 0, 0)) < 1e-9,
+                "Translation updates goal bearing");
+        expect(Math.abs(TurretAimController.fieldTargetDegrees(0, 0, Math.PI / 2, 1, 1, 1, 0) - 90) < 1e-9,
+                "Pivot offset rotates with chassis");
+        expect(Double.isNaN(TurretAimController.fieldTargetDegrees(1, 1, 0, 1, 1, 0, 0)),
+                "Coincident goal cannot define a bearing");
+        expect(Double.isNaN(TurretAimController.fieldTargetDegrees(0, 0, 0, Double.POSITIVE_INFINITY, 1, 0, 0)),
+                "Nonfinite field coordinates rejected");
+        r = new Rig();
+        expect(r.track(0, 45) > 0, "Tracking starts toward goal");
+        expect(r.track(45, 45) == 0, "Tracking stops power when aligned");
+        r.now += 0.3;
+        expect(r.track(45, 45) == 0, "Tracking stays aligned past preset settle time");
+        expect(r.track(45, 60) > 0, "Tracking follows changing bearing after settling");
+        expect(r.idle(46) == 0, "Toggle off cancels tracking motion");
+        r = new Rig();
+        r.track(0, 45);
+        r.now += 1.1;
+        expect(r.track(0, 50) == 0, "Moving targets retain stall history");
+        expect(r.track(0, 60) == 0, "Tracking cannot retry a latched stall");
+        r.idle(0);
+        expect(r.track(0, 60) > 0, "Toggle off/on retries fault");
+        expect(r.track(1, Double.NaN) == 0, "Invalid pose or zero stops tracking");
+        expect(r.track(1, 60) == 0, "Recovery requires explicit retry");
+        r = new Rig();
+        r.track(179, 179);
+        expect(r.track(179, -179) == 0, "Rear boundary prevents full-turn reversal");
+        expect(r.controller.getState().contains("rear travel"), "Rear boundary explained");
+        r = new Rig();
+        r.track(0, 45);
+        expect(r.step(1, false, true, false, false, false) < 0, "Manual overrides tracking");
+        expect(r.idle(0) == 0, "Manual release leaves tracking cancelled");
         System.out.println("Passed " + checks + " turret controller regression checks.");
     }
 }

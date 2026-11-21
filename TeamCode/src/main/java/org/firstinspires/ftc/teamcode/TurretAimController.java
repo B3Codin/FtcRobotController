@@ -36,6 +36,7 @@ final class TurretAimController {
 
     private boolean previousX, previousY, previousB, previousLb, previousRb;
     private boolean automatic;
+    private boolean previousTracking;
     private double targetDegrees = 90.0;
     private String fault;
     private String state = "Idle";
@@ -68,6 +69,19 @@ final class TurretAimController {
 
     double update(double angle, long ticks, double now, boolean lb, boolean rb,
                   boolean x, boolean y, boolean b, Settings settings) {
+        return update(angle, ticks, now, lb, rb, x, y, b, settings, false, 0.0);
+    }
+
+    /** Continuous targets retain fault history between samples. Toggle off/on to retry. */
+    double update(double angle, long ticks, double now, boolean lb, boolean rb,
+                  boolean x, boolean y, boolean b, Settings settings,
+                  boolean tracking, double trackingTarget) {
+        boolean trackingStarted = tracking && !previousTracking;
+        if (!tracking && previousTracking) {
+            automatic = false;
+            state = "Tracking stopped";
+        }
+        previousTracking = tracking;
         boolean xPressed = x && !previousX;
         boolean yPressed = y && !previousY;
         boolean bPressed = b && !previousB;
@@ -114,6 +128,16 @@ final class TurretAimController {
             startCommand(angle, ticks, now);
             automatic = true;
             state = "Aiming at " + targetDegrees + " degrees";
+        } else if (tracking) {
+            if (trackingStarted) startCommand(angle, ticks, now);
+            if (!Double.isFinite(trackingTarget) || Math.abs(trackingTarget) > LIMIT_DEGREES) {
+                fault = "Tracking requires calibrated zero, valid pose and a distinct field point";
+            } else if (!trackingStarted && Math.abs(trackingTarget - targetDegrees) > 180.0) {
+                fault = "Target crossed rear travel boundary; turn chassis and toggle tracking";
+            } else {
+                targetDegrees = trackingTarget;
+                automatic = true;
+            }
         }
         // A held input cannot keep retrying a stall or direction fault. Release and
         // press a command again to retry; every attempt still obeys travel limits.
@@ -129,7 +153,9 @@ final class TurretAimController {
             double error = targetDegrees - angle;
             if (Math.abs(error) <= ANGLE_TOLERANCE_DEGREES) {
                 if (Double.isNaN(settledSince)) settledSince = now;
-                if (now - settledSince >= SETTLE_SECONDS) {
+                if (tracking) {
+                    state = "Tracking field point / aligned";
+                } else if (now - settledSince >= SETTLE_SECONDS) {
                     automatic = false;
                     state = "Reached " + targetDegrees + " degrees";
                 } else {
@@ -188,6 +214,29 @@ final class TurretAimController {
         progressTicks = ticks;
         progressTime = now;
         return 0.0;
+    }
+
+    void cancel(double angle, long ticks, double now) {
+        automatic = false;
+        previousTracking = false;
+        state = "Cancelled";
+        rebase(angle, ticks, now);
+    }
+
+    /** Heading is CCW-positive; measured turret angles are clockwise-positive. */
+    static double fieldTargetDegrees(double robotX, double robotY, double heading,
+                                     double targetX, double targetY,
+                                     double pivotForward, double pivotLeft) {
+        double pivotX = robotX + pivotForward * Math.cos(heading) - pivotLeft * Math.sin(heading);
+        double pivotY = robotY + pivotForward * Math.sin(heading) + pivotLeft * Math.cos(heading);
+        double dx = targetX - pivotX;
+        double dy = targetY - pivotY;
+        if (!Double.isFinite(dx) || !Double.isFinite(dy) || !Double.isFinite(heading)) {
+            return Double.NaN;
+        }
+        if (Math.hypot(dx, dy) < 0.05) return Double.NaN;
+        double clockwiseAngle = heading - Math.atan2(dy, dx);
+        return Math.toDegrees(Math.atan2(Math.sin(clockwiseAngle), Math.cos(clockwiseAngle)));
     }
 
     private void startCommand(double angle, long ticks, double now) {
