@@ -53,7 +53,9 @@ public class JackbotsTeleOp extends LinearOpMode {
                 TURRET_MIN_SPEED, maxSpeed, 0.2, maxSpeed, 360.0, TURRET_TOLERANCE_DEGREES);
     }
 
-    // Field coordinates in mm, starting at (0, 0) in the bottom-left corner.
+    // Field origin is the bottom-left corner; the robot starts inset from that corner.
+    private static final double START_X_MM = 198.0;
+    private static final double START_Y_MM = -217.4;
     private static final double TURRET_OFFSET_X_MM = 48.0;
     private static final double GOAL_ONE_X_MM = 1397.6;
     private static final double GOAL_TWO_X_MM = 2260.0;
@@ -510,8 +512,10 @@ public class JackbotsTeleOp extends LinearOpMode {
         // Match the physically verified X-pod correction in TurretAimTest.
         odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
                 GoBildaPinpointDriver.EncoderDirection.FORWARD);
-        // Starting field pose: bottom-left corner (0 mm, 0 mm), heading 0 degrees.
+        // Calibrate heading, then apply the measured starting field coordinates.
         odo.resetPosAndIMU();
+        odo.setPosition(new Pose2D(DistanceUnit.MM, START_X_MM, START_Y_MM,
+                AngleUnit.DEGREES, 0.0));
     }
 
     private void drive(double forward, double right, double rotate) {
