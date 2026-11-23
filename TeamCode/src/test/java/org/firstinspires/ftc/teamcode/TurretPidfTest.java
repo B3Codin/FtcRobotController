@@ -36,8 +36,8 @@ public final class TurretPidfTest {
 
     public static void main(String[] args) {
         Rig r = new Rig();
-        near(r.track(0, 3), 0.2, "Minimum power lifts a small positive command");
-        near(r.track(0, -3), -0.2, "Minimum power preserves negative direction");
+        near(r.track(0, 4), 0.2, "Minimum power lifts a small positive command");
+        near(r.track(0, -4), -0.2, "Minimum power preserves negative direction");
         near(r.track(0, 100), 0.5, "Maximum caps a large command");
         near(r.track(100, 100), 0, "Minimum cannot keep turret moving at target");
         near(r.update(100, 100, false, false, false), 0, "Minimum cannot move an idle turret");
@@ -77,19 +77,19 @@ public final class TurretPidfTest {
         r = new Rig();
         r.settings = settings(0.1, 0.1, 0, 0, 0, 0.5);
         for (int n = 0; n < 5; n++) near(r.track(0, 20), 0.5, "Saturated output stays capped");
-        near(r.track(0, 3), 0.315, "Saturated samples do not wind up the integral");
-        near(r.track(0, -3), -0.315, "Error reversal discards old-direction integral");
+        near(r.track(0, 4), 0.42, "Saturated samples do not wind up the integral");
+        near(r.track(0, -4), -0.42, "Error reversal discards old-direction integral");
 
         for (int direction : new int[]{-1, 1}) {
             r = new Rig();
             r.settings = settings(0.01, 0.1, 0, 0.2, 0.25, 0.5);
-            expect(r.track(0, direction * 3) * direction > 0,
+            expect(r.track(0, direction * 4) * direction > 0,
                     "Move toward target outside tolerance");
-            near(r.track(direction, direction * 3), 0,
-                    "Exactly two degrees stops despite minimum power, F, and accumulated I");
-            near(r.track(direction * 2, direction * 3), 0, "Stay stopped inside tolerance");
-            near(r.track(direction * 5, direction * 3), 0, "Opposite tolerance boundary also stops");
-            expect(r.track(direction * 5.01, direction * 3) * direction < 0,
+            near(r.track(direction, direction * 4), 0,
+                    "Exactly three degrees stops despite minimum power, F, and accumulated I");
+            near(r.track(direction * 2, direction * 4), 0, "Stay stopped inside tolerance");
+            near(r.track(direction * 7, direction * 4), 0, "Opposite tolerance boundary also stops");
+            expect(r.track(direction * 7.01, direction * 4) * direction < 0,
                     "Resume correction just outside tolerance");
         }
 
@@ -110,6 +110,20 @@ public final class TurretPidfTest {
             r.settings = invalid;
             near(r.track(0, 20), 0, "Invalid settings stop movement");
             expect(r.controller.getState().contains("FAULT"), "Invalid settings produce visible fault");
+        }
+        r = new Rig();
+        expect(r.track(0, 4) > 0, "Default three-degree tolerance allows correction at four degrees");
+        r.settings = new TurretAimController.Settings(0.01, 0, 0, 0.2, 0.25, 0.5, 0.2, 0.5, 360, 5);
+        near(r.track(0, 4), 0, "Increasing live tolerance immediately stops active tracking");
+        r.settings = new TurretAimController.Settings(0.01, 0, 0, 0.2, 0.25, 0.5, 0.2, 0.5, 360, 2);
+        expect(r.track(0, 4) > 0, "Reducing live tolerance resumes correction without toggling auto");
+        near(r.track(2, 4), 0, "Live tolerance includes its exact boundary");
+        for (double invalidTolerance : new double[]{-1, Double.NaN, Double.POSITIVE_INFINITY, 181}) {
+            r = new Rig();
+            r.settings = new TurretAimController.Settings(0.01, 0, 0, 0.2, 0.25, 0.5,
+                    0.2, 0.5, 360, invalidTolerance);
+            near(r.track(0, 20), 0, "Invalid tolerance stops movement");
+            expect(r.controller.getState().contains("FAULT"), "Invalid tolerance reports fault");
         }
         System.out.println("Passed " + checks + " turret PIDF checks.");
     }

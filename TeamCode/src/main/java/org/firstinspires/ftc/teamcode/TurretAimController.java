@@ -3,13 +3,13 @@ package org.firstinspires.ftc.teamcode;
 /** Hardware-independent turret control. Positive power must increase signed encoder ticks. */
 final class TurretAimController {
     static final double LIMIT_DEGREES = 180.0;
-    // Stop automatic motion within +/-2 degrees, including both boundaries.
-    private static final double ANGLE_TOLERANCE_DEGREES = 2.0;
+    private static final double DEFAULT_ANGLE_TOLERANCE_DEGREES = 3.0;
     private static final double SETTLE_SECONDS = 0.15;
     private static final double STALL_SECONDS = 1.0;
 
     static final class Settings {
         final double p, i, d, f, minPower, maxPower, manualPower, bangBangPower, pdfRangeDegrees;
+        final double angleToleranceDegrees;
 
         Settings(double p, double d, double f, double maxPower, double manualPower,
                  double bangBangPower, double pdfRangeDegrees) {
@@ -18,6 +18,13 @@ final class TurretAimController {
 
         Settings(double p, double i, double d, double f, double minPower, double maxPower,
                  double manualPower, double bangBangPower, double pdfRangeDegrees) {
+            this(p, i, d, f, minPower, maxPower, manualPower, bangBangPower, pdfRangeDegrees,
+                    DEFAULT_ANGLE_TOLERANCE_DEGREES);
+        }
+
+        Settings(double p, double i, double d, double f, double minPower, double maxPower,
+                 double manualPower, double bangBangPower, double pdfRangeDegrees,
+                 double angleToleranceDegrees) {
             this.p = p;
             this.i = i;
             this.d = d;
@@ -27,6 +34,7 @@ final class TurretAimController {
             this.manualPower = manualPower;
             this.bangBangPower = bangBangPower;
             this.pdfRangeDegrees = pdfRangeDegrees;
+            this.angleToleranceDegrees = angleToleranceDegrees;
         }
 
         boolean valid() {
@@ -35,7 +43,8 @@ final class TurretAimController {
                     && finiteNonnegative(maxPower) && maxPower > 0.0 && maxPower <= 1.0
                     && finiteNonnegative(manualPower) && manualPower <= 1.0
                     && finiteNonnegative(bangBangPower) && bangBangPower > 0.0 && bangBangPower <= 1.0
-                    && finiteNonnegative(pdfRangeDegrees);
+                    && finiteNonnegative(pdfRangeDegrees)
+                    && finiteNonnegative(angleToleranceDegrees) && angleToleranceDegrees <= LIMIT_DEGREES;
         }
 
         private static boolean finiteNonnegative(double value) {
@@ -171,7 +180,7 @@ final class TurretAimController {
             requested = lb ? settings.manualPower : -settings.manualPower;
         } else if (automatic) {
             double error = targetDegrees - angle;
-            if (Math.abs(error) <= ANGLE_TOLERANCE_DEGREES) {
+            if (Math.abs(error) <= settings.angleToleranceDegrees) {
                 if (Double.isNaN(settledSince)) settledSince = now;
                 if (tracking) {
                     state = "Tracking field point / aligned";

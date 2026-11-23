@@ -38,17 +38,19 @@ public class JackbotsTeleOp extends LinearOpMode {
     // Live in Panels under JackbotsTeleOp. Error is degrees, time is seconds.
     // F is friction feedforward in the direction of error; speeds are servo power (0..1).
     public static volatile double TURRET_P = 0.005;
-    public static volatile double TURRET_I = 0.01;
+    public static volatile double TURRET_I = 0.0;
     public static volatile double TURRET_D = 0.0;
     public static volatile double TURRET_F = 0.11;
     public static volatile double TURRET_MIN_SPEED = 0.1;
     public static volatile double TURRET_MAX_SPEED = 1.0;
+    // Automatic aiming stops within +/- this many degrees of IdealTheta.
+    public static volatile double TURRET_TOLERANCE_DEGREES = 3.0;
 
     private static TurretAimController.Settings turretSettings() {
         // PIDF covers the entire +/-180 degree travel range (up to 360 degrees of error).
         double maxSpeed = TURRET_MAX_SPEED;
         return new TurretAimController.Settings(TURRET_P, TURRET_I, TURRET_D, TURRET_F,
-                TURRET_MIN_SPEED, maxSpeed, 0.2, maxSpeed, 360.0);
+                TURRET_MIN_SPEED, maxSpeed, 0.2, maxSpeed, 360.0, TURRET_TOLERANCE_DEGREES);
     }
 
     // Field coordinates in mm, starting at (0, 0) in the bottom-left corner.
@@ -383,6 +385,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 TURRET_P, TURRET_I, TURRET_D, TURRET_F);
         telemetry.addData("Turret min / max speed (power)", "%.3f / %.3f",
                 TURRET_MIN_SPEED, TURRET_MAX_SPEED);
+        telemetry.addData("Turret tolerance (+/- degrees)", "%.2f", TURRET_TOLERANCE_DEGREES);
     }
 
     /** Hardware-independent input handling around the existing turret controller. */
@@ -461,7 +464,7 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     /** Require uninterrupted detection; every clear reading starts the wait over. */
     static final class ColorConfirmation {
-        private static final double REQUIRED_SECONDS = 1.0;
+        private static final double REQUIRED_SECONDS = 0.5;
         private double detectedSince = Double.NaN;
 
         boolean update(boolean detected, double nowSeconds) {
