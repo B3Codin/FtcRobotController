@@ -37,11 +37,11 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     // Live in Panels under JackbotsTeleOp. Error is degrees, time is seconds.
     // F is friction feedforward in the direction of error; speeds are servo power (0..1).
-    public static volatile double TURRET_P = 0.002;
-    public static volatile double TURRET_I = 0.0;
+    public static volatile double TURRET_P = 0.005;
+    public static volatile double TURRET_I = 0.01;
     public static volatile double TURRET_D = 0.0;
-    public static volatile double TURRET_F = 0.20;
-    public static volatile double TURRET_MIN_SPEED = 0.20;
+    public static volatile double TURRET_F = 0.11;
+    public static volatile double TURRET_MIN_SPEED = 0.1;
     public static volatile double TURRET_MAX_SPEED = 1.0;
 
     private static TurretAimController.Settings turretSettings() {
