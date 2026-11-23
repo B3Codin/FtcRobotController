@@ -101,6 +101,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     private GoBildaPinpointDriver odo;
     private List<LynxModule> hubs;
     private LynxModule turretEncoderHub;
+    private final ElapsedTime pinpointStartupClock = new ElapsedTime();
+    private final StartingPose startingPose = new StartingPose();
     // Preserve field coordinates when A resets the displayed local odometry X/Y.
     private double fieldOriginXMM, fieldOriginYMM;
 
@@ -176,6 +178,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 telemetry.addLine("Align turret straight-ahead mark, then press D-pad Down to set zero.");
                 telemetry.addLine("Auto aim starts after START once zero is set and odometry is READY.");
                 telemetry.addData("Odometry status", odo.getDeviceStatus());
+                telemetry.addData("Starting field pose applied", startingPose.initialized);
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
@@ -191,7 +194,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             intakeLeft.setPosition(INTAKE_LEFT_DOWN_POSITION);
             intakeRight.setPosition(INTAKE_RIGHT_DOWN_POSITION);
 
-            boolean previousA = false, previousX = false, previousY = false;
+            // A held while pressing START must be released/re-pressed to reset X/Y.
+            boolean previousA = gamepad1.a, previousX = false, previousY = false;
             boolean flywheelsEnabled = false;
             boolean intakeUp = false;
             ColorConfirmation colorConfirmation = new ColorConfirmation();
@@ -212,6 +216,20 @@ public class JackbotsTeleOp extends LinearOpMode {
                 boolean rightTrigger = gamepad1.right_trigger > ROLLER_TRIGGER_THRESHOLD;
 
                 int turretEncoderTicks = sampleSensors();
+                if (!startingPose.initialized) {
+                    // START can arrive before calibration finishes. Keep outputs at
+                    // their initialized zero power until the field pose is read back.
+                    turret.initSample(turretEncoderTicks, zeroTurret);
+                    turret.onStart(zeroTurret, toggleTracking);
+                    previousA = a;
+                    previousX = x;
+                    previousY = y;
+                    telemetry.addLine("Keep robot still: waiting for starting field pose (198, -217.4 mm).");
+                    telemetry.addData("Odometry status", odo.getDeviceStatus());
+                    telemetry.update();
+                    idle();
+                    continue;
+                }
                 Pose2D pose = odo.getPosition();
                 if (a && !previousA) {
                     // Reset distance once per press without changing field-drive alignment
@@ -368,11 +386,38 @@ public class JackbotsTeleOp extends LinearOpMode {
         // Refresh even if a previous OpMode left MANUAL bulk caching enabled.
         for (LynxModule hub : hubs) hub.clearBulkCache();
         odo.update();
+        if (startingPose.shouldApply(odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
+                pinpointStartupClock.seconds())) {
+            odo.setPosition(new Pose2D(DistanceUnit.MM, START_X_MM, START_Y_MM,
+                    AngleUnit.DEGREES, 0.0));
+            // setPosition writes the device; getPosition remains cached until update.
+            odo.update();
+            Pose2D readback = odo.getPosition();
+            startingPose.confirm(odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
+                    readback.getX(DistanceUnit.MM), readback.getY(DistanceUnit.MM),
+                    readback.getHeading(AngleUnit.DEGREES));
+        }
         LynxModule.BulkData encoderData = turretEncoderHub.getBulkData();
         if (encoderData.isFake()) {
             throw new IllegalStateException("Turret encoder read failed; stopping OpMode.");
         }
         return encoderData.getMotorCurrentPosition(TURRET_ENCODER_PORT);
+    }
+
+    /** Startup-only initialization; never reapplies the pose after driving or an A reset. */
+    static final class StartingPose {
+        private boolean initialized;
+
+        boolean shouldApply(boolean ready, double secondsSinceReset) {
+            // SDK documents ~0.25 s calibration. Wait at least 0.5 s AND READY,
+            // so a stale READY immediately after the reset command cannot qualify.
+            return !initialized && ready && secondsSinceReset >= 0.5;
+        }
+
+        void confirm(boolean ready, double xMM, double yMM, double headingDegrees) {
+            initialized |= ready && Math.abs(xMM - START_X_MM) <= 1.0
+                    && Math.abs(yMM - START_Y_MM) <= 1.0 && Math.abs(headingDegrees) <= 0.5;
+        }
     }
 
     private void addTurretTelemetry(TurretTracking turret) {
@@ -512,10 +557,10 @@ public class JackbotsTeleOp extends LinearOpMode {
         // Match the physically verified X-pod correction in TurretAimTest.
         odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
                 GoBildaPinpointDriver.EncoderDirection.FORWARD);
-        // Calibrate heading, then apply the measured starting field coordinates.
+        // Reset/calibration completes asynchronously. sampleSensors applies the
+        // starting pose only after READY, then verifies it from a fresh device read.
         odo.resetPosAndIMU();
-        odo.setPosition(new Pose2D(DistanceUnit.MM, START_X_MM, START_Y_MM,
-                AngleUnit.DEGREES, 0.0));
+        pinpointStartupClock.reset();
         odo.update();
     }
 
