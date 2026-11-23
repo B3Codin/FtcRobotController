@@ -355,10 +355,10 @@ public class JackbotsTeleOp extends LinearOpMode {
             goalX = useGoalTwo ? GOAL_TWO_X_MM : GOAL_ONE_X_MM;
             diffX = goalX - robotX;
             diffY = GOAL_Y_MM - robotY;
-            turretGoalX = diffX + TURRET_OFFSET_X_MM * Math.cos(currentHeading);
+            turretGoalX = diffX + TURRET_OFFSET_X_MM * Math.cos(-currentHeading);
             // The supplied (357, -1687, 42.9 deg) example defines this Y sign:
             // -(216 + 32.6746) = -248.6746 mm.
-            turretGoalY = -(diffY + TURRET_OFFSET_X_MM * Math.sin(currentHeading));
+            turretGoalY = -(diffY + TURRET_OFFSET_X_MM * Math.sin(-currentHeading));
             // Java atan2 takes Y first: the example's bearing is -13.0159 deg.
             double degrees = Math.toDegrees(Math.atan2(turretGoalY, turretGoalX) + currentHeading);
             // Normalize to [-180, 180); a coincident goal has no defined bearing.
