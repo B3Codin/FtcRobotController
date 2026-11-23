@@ -333,7 +333,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             // -(216 + 32.6746) = -248.6746 mm.
             turretGoalY = -(diffY + TURRET_OFFSET_X_MM * Math.sin(currentHeading));
             // Java atan2 takes Y first: the example's bearing is -13.0159 deg.
-            double degrees = Math.toDegrees(Math.atan2(turretGoalY, turretGoalX) - currentHeading);
+            double degrees = Math.toDegrees(Math.atan2(turretGoalY, turretGoalX) + currentHeading);
             // Normalize to [-180, 180); a coincident goal has no defined bearing.
             idealTheta = Math.hypot(turretGoalX, turretGoalY) < 1e-6
                     ? Double.NaN : ((degrees + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
