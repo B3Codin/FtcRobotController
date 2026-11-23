@@ -28,7 +28,8 @@ import java.util.List;
 public class JackbotsTeleOp extends LinearOpMode {
     // Negative power preserves the front flywheel's spin direction.
     private static final double FLY_FRONT_POWER = -1.0;
-    private static final double FLY_BACK_TARGET_RPM = -2100.0;
+    // Live in Panels under JackbotsTeleOp; negative RPM preserves firing direction.
+    public static volatile double FLY_BACK_TARGET_RPM = -2100.0;
 
     // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
     // shared motor channel: read its encoder directly and keep a software zero.

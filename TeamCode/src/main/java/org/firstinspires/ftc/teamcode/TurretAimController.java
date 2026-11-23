@@ -3,7 +3,8 @@ package org.firstinspires.ftc.teamcode;
 /** Hardware-independent turret control. Positive power must increase signed encoder ticks. */
 final class TurretAimController {
     static final double LIMIT_DEGREES = 180.0;
-    private static final double ANGLE_TOLERANCE_DEGREES = 0.5;
+    // Stop automatic motion within +/-2 degrees, including both boundaries.
+    private static final double ANGLE_TOLERANCE_DEGREES = 2.0;
     private static final double SETTLE_SECONDS = 0.15;
     private static final double STALL_SECONDS = 1.0;
 
