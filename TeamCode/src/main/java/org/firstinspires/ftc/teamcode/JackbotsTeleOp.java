@@ -160,7 +160,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | Y: toggle intake up/down");
-            telemetry.addLine("Intake starts DOWN. Color raises intake and lights both RGBs green.");
+            telemetry.addLine("Intake starts DOWN. One full second of color raises intake and stops rollers.");
+            telemetry.addLine("RGBs are green while color is detected, off when clear.");
             telemetry.addLine("Rollers work only with the intake DOWN.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
@@ -189,6 +190,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             boolean previousA = false, previousX = false, previousY = false;
             boolean flywheelsEnabled = false;
             boolean intakeUp = false;
+            ColorConfirmation colorConfirmation = new ColorConfirmation();
             double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
             double backTicksPerSecondPerRPM = flyBack.getMotorType().getTicksPerRev()
@@ -228,11 +230,13 @@ public class JackbotsTeleOp extends LinearOpMode {
                 drive(robotForward, robotRight, gamepad1.right_stick_x);
 
                 boolean colorDetected = detectsColor(colorSensor.getNormalizedColors());
+                boolean colorConfirmed = colorConfirmation.update(colorDetected, clock.seconds());
+                // Indicators follow the current reading, not the delayed/latching intake state.
                 for (ServoImplEx indicator : indicators) {
                     indicator.setPosition(colorDetected ? RGB_GREEN : RGB_OFF);
                 }
 
-                if (colorDetected) {
+                if (colorConfirmed) {
                     intakeUp = true;
                 } else if (y && !previousY) {
                     intakeUp = !intakeUp;
@@ -267,6 +271,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 }
 
                 telemetry.addData("Color detected", colorDetected);
+                telemetry.addData("Color confirmed (1 second)", colorConfirmed);
                 telemetry.addData("Intake", intakeUp ? "UP" : "DOWN");
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
@@ -451,6 +456,21 @@ public class JackbotsTeleOp extends LinearOpMode {
             if (trackingRequested && !zeroEstablished) return "Waiting for straight-ahead zero";
             if (trackingRequested && !trackingActive && !previousZero) return "Waiting for odometry READY";
             return controller.getState();
+        }
+    }
+
+    /** Require uninterrupted detection; every clear reading starts the wait over. */
+    static final class ColorConfirmation {
+        private static final double REQUIRED_SECONDS = 1.0;
+        private double detectedSince = Double.NaN;
+
+        boolean update(boolean detected, double nowSeconds) {
+            if (!detected) {
+                detectedSince = Double.NaN;
+                return false;
+            }
+            if (Double.isNaN(detectedSince)) detectedSince = nowSeconds;
+            return nowSeconds - detectedSince >= REQUIRED_SECONDS;
         }
     }
 
