@@ -1,0 +1,43 @@
+{
+  "source": "turret-1795278886850-842194851.csv",
+  "assumptions": [
+    "INIT pose (0 m, 0 m, 0 degrees)",
+    "X pod reversed in original batch; Y unchanged",
+    "Translation at midpoint heading between saved samples",
+    "Pivot offset assumed zero; fitted trim includes alignment and residual reconstruction error"
+  ],
+  "models": {
+    "before": {
+      "goal_x_m": 1.087514385127357,
+      "goal_y_m": -1.2113726899576887,
+      "clockwise_target_trim_deg": -4.850182105798516,
+      "all_sample_rms_deg": 4.030606256621307,
+      "heldout_rms_deg": 4.786113935631923,
+      "max_abs_error_deg": 8.299179963134634
+    },
+    "midpoint": {
+      "goal_x_m": 0.9869584911902701,
+      "goal_y_m": -1.3126296453602442,
+      "clockwise_target_trim_deg": -4.007486898896893,
+      "all_sample_rms_deg": 6.06191520897324,
+      "heldout_rms_deg": 6.833122960164322,
+      "max_abs_error_deg": 10.832809124965621
+    },
+    "after": {
+      "goal_x_m": 0.8889950396308405,
+      "goal_y_m": -1.3430809471385303,
+      "clockwise_target_trim_deg": -1.0954541556246504,
+      "all_sample_rms_deg": 6.8933861301983095,
+      "heldout_rms_deg": 7.089253871637418,
+      "max_abs_error_deg": 15.077149206946011
+    }
+  },
+  "heldout_samples": [
+    3,
+    7,
+    11,
+    15,
+    19,
+    21
+  ]
+}

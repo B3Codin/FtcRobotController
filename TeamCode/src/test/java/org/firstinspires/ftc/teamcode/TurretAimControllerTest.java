@@ -205,6 +205,18 @@ public final class TurretAimControllerTest {
                 "Coincident goal cannot define a bearing");
         expect(Double.isNaN(TurretAimController.fieldTargetDegrees(0, 0, 0, Double.POSITIVE_INFINITY, 1, 0, 0)),
                 "Nonfinite field coordinates rejected");
+        expect(Math.abs(TurretAimController.fieldTargetDegrees(0, 0, 0, 1, 0, 0, 0, -4) + 4) < 1e-9,
+                "Fitted clockwise trim has the measured sign");
+        expect(Math.abs(TurretAimController.fieldTargetDegrees(0, 0, Math.toRadians(179), 1, 0, 0, 0, 4) + 177) < 1e-9,
+                "Trimmed target wraps into physical travel range");
+        expect(Double.isNaN(TurretAimController.fieldTargetDegrees(0, 0, 0, 1, 0, 0, 0, Double.NaN)),
+                "Invalid trim cannot command movement");
+        double originalTarget = TurretAimController.fieldTargetDegrees(0.3, -0.4, 0.7,
+                0.986958491, -1.312629645, 0, 0, -4.007486899);
+        double rebasedTarget = TurretAimController.fieldTargetDegrees(0, 0, 0.7,
+                0.986958491 - 0.3, -1.312629645 + 0.4, 0, 0, -4.007486899);
+        expect(Math.abs(originalTarget - rebasedTarget) < 1e-9,
+                "Rebasing both robot and goal preserves the aiming direction");
         r = new Rig();
         expect(r.track(0, 45) > 0, "Tracking starts toward goal");
         expect(r.track(45, 45) == 0, "Tracking stops power when aligned");

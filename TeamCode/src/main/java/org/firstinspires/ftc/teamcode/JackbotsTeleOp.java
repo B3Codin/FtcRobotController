@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
+import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.hardware.rev.RevColorSensorV3;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
@@ -12,20 +13,31 @@ import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.ServoImplEx;
 import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigurationType;
+import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 
-/** Emily's field-relative drive with intake, turret, and flywheels. */
+import java.util.List;
+
+/** Field-relative drive with intake, encoder-controlled goal aiming, and flywheels. */
 @TeleOp(name = "JackbotsTeleOp")
 public class JackbotsTeleOp extends LinearOpMode {
     // Negative power preserves the front flywheel's spin direction.
     private static final double FLY_FRONT_POWER = -1.0;
     private static final double FLY_BACK_TARGET_RPM = -2100.0;
 
-    // Turret power magnitude (0.0-1.0): LB applies positive, RB applies negative.
-    private static final double TURRET_POWER = -0.2;
+    // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
+    // shared motor channel: read its encoder directly and keep a software zero.
+    private static final int TURRET_ENCODER_PORT = 0;
+
+    // Field coordinates in mm, starting at (0, 0) in the bottom-left corner.
+    private static final double TURRET_OFFSET_X_MM = 48.0;
+    private static final double GOAL_ONE_X_MM = 1397.6;
+    private static final double GOAL_TWO_X_MM = 2260.0;
+    private static final double GOAL_Y_MM = -1471.0;
+    private static final double GOAL_SWITCH_X_MM = 1829.0;
 
     // TODO: replace all four placeholders with measured up/down positions.
     private static final double INTAKE_LEFT_UP_POSITION = 0.73;
@@ -64,6 +76,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     private Servo intakeLeft, intakeRight;
     private CRServo leftTurretServo, rightTurretServo;
     private GoBildaPinpointDriver odo;
+    private List<LynxModule> hubs;
+    private LynxModule turretEncoderHub;
+    // Preserve field coordinates when A resets the displayed local odometry X/Y.
+    private double fieldOriginXMM, fieldOriginYMM;
 
     @Override
     public void runOpMode() {
@@ -114,11 +130,14 @@ public class JackbotsTeleOp extends LinearOpMode {
                     DcMotor.RunMode.RUN_USING_ENCODER);
             flyBack.setVelocityPIDFCoefficients(FLY_BACK_P, 0.0, 0.0, FLY_BACK_F);
             configurePinpoint();
+            configureTurretEncoder();
+            ElapsedTime clock = new ElapsedTime();
+            TurretTracking turret = new TurretTracking(sampleSensors(), gamepad1.dpad_down);
 
             telemetry.setMsTransmissionInterval(100);
             telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
-            telemetry.addLine("A: reset X/Y (preserve heading) | LT: intake | RT: outtake");
-            telemetry.addLine("Hold LB: turret positive | Hold RB: turret negative");
+            telemetry.addLine("A: reset local X/Y (preserve field aim) | LT: intake | RT: outtake");
+            telemetry.addLine("LB/RB: manual turret | Both: stop/clear fault | D-pad Up: toggle auto aim");
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | Y: toggle intake up/down");
@@ -127,18 +146,23 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
             while (opModeInInit()) {
-                odo.update();
+                turret.initSample(sampleSensors(), gamepad1.dpad_down);
                 Pose2D pose = odo.getPosition();
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
+                telemetry.addLine("Align turret straight-ahead mark, then press D-pad Down to set zero.");
+                telemetry.addLine("Auto aim starts after START once zero is set and odometry is READY.");
                 telemetry.addData("Odometry status", odo.getDeviceStatus());
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
+                calculateAndReportTurretTarget(pose);
+                addTurretTelemetry(turret);
                 telemetry.update();
                 idle();
             }
             waitForStart();
             if (isStopRequested()) return;
+            turret.onStart(gamepad1.dpad_down, gamepad1.dpad_up);
 
             intakeLeft.setPosition(INTAKE_LEFT_DOWN_POSITION);
             intakeRight.setPosition(INTAKE_RIGHT_DOWN_POSITION);
@@ -157,14 +181,18 @@ public class JackbotsTeleOp extends LinearOpMode {
                 boolean y = gamepad1.y;
                 boolean leftBumper = gamepad1.left_bumper;
                 boolean rightBumper = gamepad1.right_bumper;
+                boolean zeroTurret = gamepad1.dpad_down;
+                boolean toggleTracking = gamepad1.dpad_up;
                 boolean leftTrigger = gamepad1.left_trigger > ROLLER_TRIGGER_THRESHOLD;
                 boolean rightTrigger = gamepad1.right_trigger > ROLLER_TRIGGER_THRESHOLD;
 
-                odo.update();
+                int turretEncoderTicks = sampleSensors();
                 Pose2D pose = odo.getPosition();
                 if (a && !previousA) {
                     // Reset distance once per press without changing field-drive alignment
-                    // or recalibrating the IMU while the robot could be moving.
+                    // or moving the field goals / goal-selection boundary.
+                    fieldOriginXMM += pose.getX(DistanceUnit.MM);
+                    fieldOriginYMM += pose.getY(DistanceUnit.MM);
                     pose = new Pose2D(DistanceUnit.METER, 0.0, 0.0,
                             AngleUnit.RADIANS, pose.getHeading(AngleUnit.RADIANS));
                     odo.setPosition(pose);
@@ -200,13 +228,11 @@ public class JackbotsTeleOp extends LinearOpMode {
                 intakeLeft.setPosition(intakeUp ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
                 intakeRight.setPosition(intakeUp ? INTAKE_RIGHT_UP_POSITION : INTAKE_RIGHT_DOWN_POSITION);
 
-                // Both turret CR servos run together, as in CRServosTest.
-                double turretPower = 0.0;
-                if (leftBumper && !rightBumper) {
-                    turretPower = TURRET_POWER;
-                } else if (rightBumper && !leftBumper) {
-                    turretPower = -TURRET_POWER;
-                }
+                double idealTheta = calculateAndReportTurretTarget(pose);
+                double turretPower = turret.update(turretEncoderTicks, clock.seconds(),
+                        odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
+                        idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper);
+                // Both CR servos drive one turret and share the same controller output.
                 leftTurretServo.setPower(turretPower);
                 rightTurretServo.setPower(turretPower);
 
@@ -226,6 +252,10 @@ public class JackbotsTeleOp extends LinearOpMode {
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
+                addTurretTelemetry(turret);
+                telemetry.addData("Odometry status", odo.getDeviceStatus());
+                telemetry.addLine("D-pad Down: set straight zero | D-pad Up: toggle auto aim / retry");
+                telemetry.addLine("LB/RB: manual (cancels auto) | Both: stop/clear fault");
                 telemetry.addData("Turret LB / RB", "%b / %b", leftBumper, rightBumper);
                 telemetry.addData("Turret commanded power (both servos)", "%.2f", turretPower);
                 telemetry.addData("flyFront power", "%.2f", frontFlywheelPower);
@@ -248,6 +278,158 @@ public class JackbotsTeleOp extends LinearOpMode {
             for (ServoImplEx indicator : indicators) {
                 indicator.setPosition(RGB_OFF);
             }
+        }
+    }
+
+    private double calculateAndReportTurretTarget(Pose2D pose) {
+        double robotX = pose.getX(DistanceUnit.MM) + fieldOriginXMM;
+        double robotY = pose.getY(DistanceUnit.MM) + fieldOriginYMM;
+        // Use the odometry heading in radians for trig; the drive offset is separate.
+        double currentHeading = pose.getHeading(AngleUnit.RADIANS);
+        TurretTarget target = new TurretTarget(robotX, robotY, currentHeading);
+
+        telemetry.addData("Field robot X / Y (mm)", "%.1f / %.1f", robotX, robotY);
+        telemetry.addData("Selected goal", target.useGoalTwo ? 2 : 1);
+        telemetry.addData("Goal X / Y (mm)", "%.1f / %.1f", target.goalX, GOAL_Y_MM);
+        telemetry.addData("DiffX / DiffY (mm)", "%.1f / %.1f", target.diffX, target.diffY);
+        telemetry.addData("TurretGoalX / TurretGoalY (mm)", "%.1f / %.1f",
+                target.turretGoalX, target.turretGoalY);
+        telemetry.addData("IdealTheta (Degrees)", "%.2f", target.idealTheta);
+        return target.idealTheta;
+    }
+
+    /** Field distances in mm; heading in radians; target in signed degrees. */
+    static final class TurretTarget {
+        final boolean useGoalTwo;
+        final double goalX, diffX, diffY, turretGoalX, turretGoalY, idealTheta;
+
+        TurretTarget(double robotX, double robotY, double currentHeading) {
+            // Keep goal one at the boundary; switch to goal two only above 1829 mm.
+            useGoalTwo = robotX > GOAL_SWITCH_X_MM;
+            goalX = useGoalTwo ? GOAL_TWO_X_MM : GOAL_ONE_X_MM;
+            diffX = goalX - robotX;
+            diffY = GOAL_Y_MM - robotY;
+            turretGoalX = diffX + TURRET_OFFSET_X_MM * Math.cos(currentHeading);
+            // The supplied (357, -1687, 42.9 deg) example defines this Y sign:
+            // -(216 + 32.6746) = -248.6746 mm.
+            turretGoalY = -(diffY + TURRET_OFFSET_X_MM * Math.sin(currentHeading));
+            // Java atan2 takes Y first: the example's bearing is -13.0159 deg.
+            double degrees = Math.toDegrees(Math.atan2(turretGoalY, turretGoalX) - currentHeading);
+            // Normalize to [-180, 180); a coincident goal has no defined bearing.
+            idealTheta = Math.hypot(turretGoalX, turretGoalY) < 1e-6
+                    ? Double.NaN : ((degrees + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        }
+    }
+
+    private void configureTurretEncoder() {
+        hubs = hardwareMap.getAll(LynxModule.class);
+        for (LynxModule hub : hubs) {
+            if (!hub.isParent()) {
+                if (turretEncoderHub != null) {
+                    throw new IllegalStateException("Multiple Expansion Hubs: select turret encoder Hub explicitly.");
+                }
+                turretEncoderHub = hub;
+            }
+        }
+        if (turretEncoderHub == null) {
+            throw new IllegalStateException("Turret encoder Expansion Hub missing; check RS485 connection.");
+        }
+    }
+
+    private int sampleSensors() {
+        // Refresh even if a previous OpMode left MANUAL bulk caching enabled.
+        for (LynxModule hub : hubs) hub.clearBulkCache();
+        odo.update();
+        LynxModule.BulkData encoderData = turretEncoderHub.getBulkData();
+        if (encoderData.isFake()) {
+            throw new IllegalStateException("Turret encoder read failed; stopping OpMode.");
+        }
+        return encoderData.getMotorCurrentPosition(TURRET_ENCODER_PORT);
+    }
+
+    private void addTurretTelemetry(TurretTracking turret) {
+        telemetry.addData("Turret auto requested", turret.trackingRequested);
+        telemetry.addData("Turret zero", turret.zeroEstablished
+                ? "Straight-ahead mark" : "Align straight-ahead mark and press D-pad Down");
+        telemetry.addData("Turret state", turret.state());
+        telemetry.addData("Turret angle (Degrees)", "%.2f", turret.angleDegrees());
+        telemetry.addData("Turret encoder ticks (from zero)", turret.signedTicks);
+        telemetry.addData("Turret controller target (Degrees)", "%.2f", turret.controller.getTargetDegrees());
+    }
+
+    /** Hardware-independent input handling around the existing turret controller. */
+    static final class TurretTracking {
+        private static final int ENCODER_SIGN = 1;
+        private static final double TICKS_PER_DEGREE = 8192.0 * (90.0 / 24.0) / 360.0;
+        // Match TurretAimTest: P, D, friction F, maximum, manual, bang-bang, PDF range.
+        private static final TurretAimController.Settings SETTINGS =
+                new TurretAimController.Settings(0.002, 0.0, 0.20, 1.0, 0.2, 1.0, 30.0);
+        final TurretAimController controller = new TurretAimController(false, false, false);
+        private int zeroTicks;
+        private long signedTicks;
+        private boolean zeroEstablished;
+        private boolean trackingRequested = true;
+        private boolean trackingActive;
+        private boolean previousZero, previousToggle;
+
+        TurretTracking(int rawTicks, boolean zeroHeld) {
+            zeroTicks = rawTicks;
+            previousZero = zeroHeld;
+        }
+
+        void initSample(int rawTicks, boolean zero) {
+            if (zero && !previousZero) calibrate(rawTicks);
+            signedTicks = ENCODER_SIGN * ((long) rawTicks - zeroTicks);
+            previousZero = zero;
+        }
+
+        void onStart(boolean zeroHeld, boolean toggleHeld) {
+            previousZero = zeroHeld;
+            previousToggle = toggleHeld;
+        }
+
+        double update(int rawTicks, double now, boolean odometryReady, double idealTheta,
+                      boolean zero, boolean toggle, boolean lb, boolean rb) {
+            boolean zeroPressed = zero && !previousZero;
+            if (zeroPressed) calibrate(rawTicks);
+            signedTicks = ENCODER_SIGN * ((long) rawTicks - zeroTicks);
+            if (zeroPressed) controller.cancel(angleDegrees(), signedTicks, now);
+            if (toggle && !previousToggle) trackingRequested = !trackingRequested;
+            previousZero = zero;
+            previousToggle = toggle;
+            // Preserve JackbotsTeleOp's manual directions: LB negative, RB positive.
+            // Any manual input leaves auto off until D-pad Up explicitly resumes it.
+            if (lb || rb) trackingRequested = false;
+            if (!trackingRequested || zero) {
+                trackingActive = false;
+            } else if (zeroEstablished && odometryReady) {
+                trackingActive = true;
+            }
+            // Once tracking starts, loss of READY is sent as an invalid target so
+            // the existing controller latches the fault until an explicit retry.
+            double power = controller.update(angleDegrees(), signedTicks, now,
+                    rb && !zero, lb && !zero, false, false, false, SETTINGS,
+                    trackingActive, odometryReady ? idealTheta : Double.NaN);
+            if (zero) {
+                controller.cancel(angleDegrees(), signedTicks, now);
+                return 0.0;
+            }
+            return power;
+        }
+
+        private void calibrate(int rawTicks) {
+            zeroTicks = rawTicks;
+            zeroEstablished = true;
+        }
+
+        double angleDegrees() {
+            return signedTicks / TICKS_PER_DEGREE;
+        }
+
+        String state() {
+            if (trackingRequested && !zeroEstablished) return "Waiting for straight-ahead zero";
+            if (trackingRequested && !trackingActive && !previousZero) return "Waiting for odometry READY";
+            return controller.getState();
         }
     }
 
@@ -278,11 +460,13 @@ public class JackbotsTeleOp extends LinearOpMode {
     }
 
     private void configurePinpoint() {
-        // Same measured offsets, pod type, and encoder directions as Emily.
+        // Same measured offsets and pod type as TurretAimTest.
         odo.setOffsets(0.4161412697138749, -2.594972445270208, DistanceUnit.INCH);
         odo.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
-        odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.REVERSED,
+        // Match the physically verified X-pod correction in TurretAimTest.
+        odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
                 GoBildaPinpointDriver.EncoderDirection.FORWARD);
+        // Starting field pose: bottom-left corner (0 mm, 0 mm), heading 0 degrees.
         odo.resetPosAndIMU();
     }
 

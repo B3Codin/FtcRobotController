@@ -198,7 +198,7 @@ final class TurretAimController {
                 progressTicks = ticks;
                 progressTime = now;
             } else if (now - progressTime >= STALL_SECONDS) {
-                fault = "No encoder progress for 1 second: check encoder / wiring";
+                fault = "No turret movement for 1 second: check command power, mechanism and encoder";
             }
             if (fault != null) {
                 automatic = false;
@@ -227,15 +227,23 @@ final class TurretAimController {
     static double fieldTargetDegrees(double robotX, double robotY, double heading,
                                      double targetX, double targetY,
                                      double pivotForward, double pivotLeft) {
+        return fieldTargetDegrees(robotX, robotY, heading, targetX, targetY,
+                pivotForward, pivotLeft, 0.0);
+    }
+
+    static double fieldTargetDegrees(double robotX, double robotY, double heading,
+                                     double targetX, double targetY,
+                                     double pivotForward, double pivotLeft, double clockwiseTrimDegrees) {
         double pivotX = robotX + pivotForward * Math.cos(heading) - pivotLeft * Math.sin(heading);
         double pivotY = robotY + pivotForward * Math.sin(heading) + pivotLeft * Math.cos(heading);
         double dx = targetX - pivotX;
         double dy = targetY - pivotY;
-        if (!Double.isFinite(dx) || !Double.isFinite(dy) || !Double.isFinite(heading)) {
+        if (!Double.isFinite(dx) || !Double.isFinite(dy) || !Double.isFinite(heading)
+                || !Double.isFinite(clockwiseTrimDegrees)) {
             return Double.NaN;
         }
         if (Math.hypot(dx, dy) < 0.05) return Double.NaN;
-        double clockwiseAngle = heading - Math.atan2(dy, dx);
+        double clockwiseAngle = heading - Math.atan2(dy, dx) + Math.toRadians(clockwiseTrimDegrees);
         return Math.toDegrees(Math.atan2(Math.sin(clockwiseAngle), Math.cos(clockwiseAngle)));
     }
 
