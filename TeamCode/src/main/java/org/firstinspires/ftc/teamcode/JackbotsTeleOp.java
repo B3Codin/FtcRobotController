@@ -516,6 +516,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         odo.resetPosAndIMU();
         odo.setPosition(new Pose2D(DistanceUnit.MM, START_X_MM, START_Y_MM,
                 AngleUnit.DEGREES, 0.0));
+        odo.update();
     }
 
     private void drive(double forward, double right, double rotate) {
