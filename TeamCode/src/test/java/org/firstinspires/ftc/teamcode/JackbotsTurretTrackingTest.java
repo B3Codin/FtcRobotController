@@ -14,6 +14,8 @@ public final class JackbotsTurretTrackingTest {
     private static final class Rig {
         // A nonzero Hub count proves calibration does not assume a reset motor channel.
         final JackbotsTeleOp.TurretTracking turret = new JackbotsTeleOp.TurretTracking(12345, false);
+        TurretAimController.Settings settings =
+                new TurretAimController.Settings(0.002, 0.0, 0.0, 0.20, 0.20, 1.0, 0.2, 1.0, 360.0);
         double now;
 
         void calibrate() {
@@ -26,7 +28,7 @@ public final class JackbotsTurretTrackingTest {
                     boolean toggle, boolean lb, boolean rb) {
             now += 0.05;
             int rawTicks = 12345 + (int) Math.round(angle * 8192.0 * 3.75 / 360.0);
-            return turret.update(rawTicks, now, ready, target, zero, toggle, lb, rb);
+            return turret.update(rawTicks, now, ready, target, zero, toggle, lb, rb, settings);
         }
 
         double track(double angle, double target) {
@@ -62,7 +64,8 @@ public final class JackbotsTurretTrackingTest {
         r.calibrate();
         expect(r.step(0, START_TARGET, false, false, false, false, false) == 0,
                 "Calibrated turret waits for odometry READY");
-        expect(r.track(0, START_TARGET) == -1.0, "Auto starts toward negative IdealTheta");
+        expect(Math.abs(r.track(0, START_TARGET) - (0.002 * START_TARGET - 0.2)) < 1e-9,
+                "Auto uses PIDF even outside the former 30-degree bang-bang range");
         expect(r.track(-20, START_TARGET) < 0, "Tracking continues with new encoder samples");
         expect(r.track(START_TARGET, START_TARGET) == 0, "Encoder arrival stops both-servo command");
         expect(Math.abs(r.turret.angleDegrees() - START_TARGET) < 0.006,

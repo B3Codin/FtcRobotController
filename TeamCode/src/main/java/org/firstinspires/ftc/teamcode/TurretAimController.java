@@ -8,13 +8,20 @@ final class TurretAimController {
     private static final double STALL_SECONDS = 1.0;
 
     static final class Settings {
-        final double p, d, f, maxPower, manualPower, bangBangPower, pdfRangeDegrees;
+        final double p, i, d, f, minPower, maxPower, manualPower, bangBangPower, pdfRangeDegrees;
 
         Settings(double p, double d, double f, double maxPower, double manualPower,
                  double bangBangPower, double pdfRangeDegrees) {
+            this(p, 0.0, d, f, 0.0, maxPower, manualPower, bangBangPower, pdfRangeDegrees);
+        }
+
+        Settings(double p, double i, double d, double f, double minPower, double maxPower,
+                 double manualPower, double bangBangPower, double pdfRangeDegrees) {
             this.p = p;
+            this.i = i;
             this.d = d;
             this.f = f;
+            this.minPower = minPower;
             this.maxPower = maxPower;
             this.manualPower = manualPower;
             this.bangBangPower = bangBangPower;
@@ -22,7 +29,8 @@ final class TurretAimController {
         }
 
         boolean valid() {
-            return finiteNonnegative(p) && finiteNonnegative(d) && finiteNonnegative(f)
+            return finiteNonnegative(p) && finiteNonnegative(i) && finiteNonnegative(d) && finiteNonnegative(f)
+                    && finiteNonnegative(minPower) && minPower <= maxPower
                     && finiteNonnegative(maxPower) && maxPower > 0.0 && maxPower <= 1.0
                     && finiteNonnegative(manualPower) && manualPower <= 1.0
                     && finiteNonnegative(bangBangPower) && bangBangPower > 0.0 && bangBangPower <= 1.0
@@ -44,6 +52,10 @@ final class TurretAimController {
     private double lastTime;
     private double velocity;
     private double power;
+    // Store the I contribution in power units; cap it and discard it on mode changes.
+    private double integralPower;
+    private double previousError;
+    private double previousIGain = Double.NaN;
     private long progressTicks;
     private double progressTime;
     private double directionStarted;
@@ -64,6 +76,8 @@ final class TurretAimController {
         progressTime = now;
         directionStarted = now;
         power = 0.0;
+        integralPower = 0.0;
+        previousError = 0.0;
         settledSince = Double.NaN;
     }
 
@@ -96,6 +110,10 @@ final class TurretAimController {
             automatic = false;
             return stop(ticks, now);
         }
+        // Live edits to I cannot revive accumulated error from a different gain.
+        if (settings.i != previousIGain) integralPower = 0.0;
+        previousIGain = settings.i;
+        integralPower = Math.max(-settings.maxPower, Math.min(settings.maxPower, integralPower));
 
         double dt = now - lastTime;
         if (Double.isNaN(lastAngle) || dt <= 0.0) {
@@ -148,6 +166,7 @@ final class TurretAimController {
 
         double requested = 0.0;
         if (lb != rb) {
+            integralPower = 0.0;
             requested = lb ? settings.manualPower : -settings.manualPower;
         } else if (automatic) {
             double error = targetDegrees - angle;
@@ -164,14 +183,37 @@ final class TurretAimController {
             } else {
                 settledSince = Double.NaN;
                 if (Math.abs(error) > settings.pdfRangeDegrees) {
+                    integralPower = 0.0;
                     state = "Bang-bang to " + targetDegrees + " degrees";
                     requested = settings.bangBangPower * Math.signum(error);
                 } else {
-                    state = "PDF to " + targetDegrees + " degrees";
-                    requested = settings.p * error - settings.d * velocity
+                    state = "PIDF to " + targetDegrees + " degrees";
+                    if (Math.signum(error) != Math.signum(previousError)) integralPower = 0.0;
+                    double basePower = settings.p * error - settings.d * velocity
                             + settings.f * Math.signum(error);
+                    if (dt > 0.0 && settings.i > 0.0) {
+                        double nextIntegral = Math.max(-settings.maxPower, Math.min(settings.maxPower,
+                                integralPower + settings.i * error * dt));
+                        double candidate = basePower + nextIntegral;
+                        // Integrate only if the output fits, or the error would unwind saturation.
+                        if (Math.abs(candidate) <= settings.maxPower
+                                || Math.signum(error) != Math.signum(candidate)) {
+                            integralPower = nextIntegral;
+                        }
+                    }
+                    requested = basePower + integralPower;
                 }
+                previousError = error;
             }
+        }
+        if (!Double.isFinite(requested)) {
+            fault = "Nonfinite turret PIDF output; check gains";
+            automatic = false;
+            return stop(ticks, now);
+        }
+        // Zero stays zero at the target, when cancelled, or when faulted.
+        if (requested != 0.0) {
+            requested = Math.copySign(Math.max(settings.minPower, Math.abs(requested)), requested);
         }
         requested = Math.max(-settings.maxPower, Math.min(settings.maxPower, requested));
 
@@ -211,6 +253,8 @@ final class TurretAimController {
 
     private double stop(long ticks, double now) {
         power = 0.0;
+        integralPower = 0.0;
+        previousError = 0.0;
         progressTicks = ticks;
         progressTime = now;
         return 0.0;

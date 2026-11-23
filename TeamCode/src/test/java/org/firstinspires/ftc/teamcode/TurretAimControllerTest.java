@@ -163,7 +163,7 @@ public final class TurretAimControllerTest {
                 r.settings = new TurretAimController.Settings(0.02, 0, 0.05, 1, 0.2, 0.7, 10);
                 expect(r.target(target - direction * 10, target) == direction * 0.25,
                         "PDF at boundary, target " + target + ", direction " + direction);
-                expect(r.controller.getState().contains("PDF"), "PDF phase reported");
+                expect(r.controller.getState().contains("PIDF"), "PIDF phase reported");
             }
         }
 

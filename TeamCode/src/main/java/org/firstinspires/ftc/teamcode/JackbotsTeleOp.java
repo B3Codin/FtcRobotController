@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.hardware.rev.RevColorSensorV3;
@@ -22,6 +23,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 import java.util.List;
 
 /** Field-relative drive with intake, encoder-controlled goal aiming, and flywheels. */
+@Configurable
 @TeleOp(name = "JackbotsTeleOp")
 public class JackbotsTeleOp extends LinearOpMode {
     // Negative power preserves the front flywheel's spin direction.
@@ -31,6 +33,22 @@ public class JackbotsTeleOp extends LinearOpMode {
     // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
     // shared motor channel: read its encoder directly and keep a software zero.
     private static final int TURRET_ENCODER_PORT = 0;
+
+    // Live in Panels under JackbotsTeleOp. Error is degrees, time is seconds.
+    // F is friction feedforward in the direction of error; speeds are servo power (0..1).
+    public static volatile double TURRET_P = 0.002;
+    public static volatile double TURRET_I = 0.0;
+    public static volatile double TURRET_D = 0.0;
+    public static volatile double TURRET_F = 0.20;
+    public static volatile double TURRET_MIN_SPEED = 0.20;
+    public static volatile double TURRET_MAX_SPEED = 1.0;
+
+    private static TurretAimController.Settings turretSettings() {
+        // PIDF covers the entire +/-180 degree travel range (up to 360 degrees of error).
+        double maxSpeed = TURRET_MAX_SPEED;
+        return new TurretAimController.Settings(TURRET_P, TURRET_I, TURRET_D, TURRET_F,
+                TURRET_MIN_SPEED, maxSpeed, 0.2, maxSpeed, 360.0);
+    }
 
     // Field coordinates in mm, starting at (0, 0) in the bottom-left corner.
     private static final double TURRET_OFFSET_X_MM = 48.0;
@@ -231,7 +249,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 double idealTheta = calculateAndReportTurretTarget(pose);
                 double turretPower = turret.update(turretEncoderTicks, clock.seconds(),
                         odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
-                        idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper);
+                        idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper, turretSettings());
                 // Both CR servos drive one turret and share the same controller output.
                 leftTurretServo.setPower(turretPower);
                 rightTurretServo.setPower(turretPower);
@@ -355,15 +373,16 @@ public class JackbotsTeleOp extends LinearOpMode {
         telemetry.addData("Turret angle (Degrees)", "%.2f", turret.angleDegrees());
         telemetry.addData("Turret encoder ticks (from zero)", turret.signedTicks);
         telemetry.addData("Turret controller target (Degrees)", "%.2f", turret.controller.getTargetDegrees());
+        telemetry.addData("Turret P / I / D / F", "%.5f / %.5f / %.5f / %.3f",
+                TURRET_P, TURRET_I, TURRET_D, TURRET_F);
+        telemetry.addData("Turret min / max speed (power)", "%.3f / %.3f",
+                TURRET_MIN_SPEED, TURRET_MAX_SPEED);
     }
 
     /** Hardware-independent input handling around the existing turret controller. */
     static final class TurretTracking {
         private static final int ENCODER_SIGN = 1;
         private static final double TICKS_PER_DEGREE = 8192.0 * (90.0 / 24.0) / 360.0;
-        // Match TurretAimTest: P, D, friction F, maximum, manual, bang-bang, PDF range.
-        private static final TurretAimController.Settings SETTINGS =
-                new TurretAimController.Settings(0.002, 0.0, 0.20, 1.0, 0.2, 1.0, 30.0);
         final TurretAimController controller = new TurretAimController(false, false, false);
         private int zeroTicks;
         private long signedTicks;
@@ -389,7 +408,8 @@ public class JackbotsTeleOp extends LinearOpMode {
         }
 
         double update(int rawTicks, double now, boolean odometryReady, double idealTheta,
-                      boolean zero, boolean toggle, boolean lb, boolean rb) {
+                      boolean zero, boolean toggle, boolean lb, boolean rb,
+                      TurretAimController.Settings settings) {
             boolean zeroPressed = zero && !previousZero;
             if (zeroPressed) calibrate(rawTicks);
             signedTicks = ENCODER_SIGN * ((long) rawTicks - zeroTicks);
@@ -408,7 +428,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             // Once tracking starts, loss of READY is sent as an invalid target so
             // the existing controller latches the fault until an explicit retry.
             double power = controller.update(angleDegrees(), signedTicks, now,
-                    rb && !zero, lb && !zero, false, false, false, SETTINGS,
+                    rb && !zero, lb && !zero, false, false, false, settings,
                     trackingActive, odometryReady ? idealTheta : Double.NaN);
             if (zero) {
                 controller.cancel(angleDegrees(), signedTicks, now);
