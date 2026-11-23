@@ -29,7 +29,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     // Negative power preserves the front flywheel's spin direction.
     private static final double FLY_FRONT_POWER = -1.0;
     // Live in Panels under JackbotsTeleOp; negative RPM preserves firing direction.
-    public static volatile double FLY_BACK_TARGET_RPM = -2100.0;
+    public static volatile double FLY_BACK_TARGET_RPM = -1000.0;
 
     // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
     // shared motor channel: read its encoder directly and keep a software zero.
@@ -68,16 +68,17 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double INTAKE_LEFT_DOWN_POSITION = 0.64;
     private static final double INTAKE_RIGHT_DOWN_POSITION = 0.46;
 
-    // REV Hub velocity gains for the back flywheel. I and D are held at zero.
-    private static final double FLY_BACK_P = 100;
-    private static final double FLY_BACK_F = 11.211;
-
-    // goBILDA Yellow Jacket front gearbox ratio (nominally 5.2:1).
+    // Both flywheels use the same goBILDA Yellow Jacket gearbox (nominally 5.2:1).
     private static final double FLY_FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
     private static final double FLY_FRONT_MOTOR_MAX_RPM = 1150.0;
-    private static final double FLY_BACK_MOTOR_GEARING = 1.0;
-    private static final double FLY_BACK_MOTOR_MAX_RPM = 6000.0;
+    private static final double FLY_BACK_MOTOR_GEARING = FLY_FRONT_MOTOR_GEARING;
+    private static final double FLY_BACK_MOTOR_MAX_RPM = FLY_FRONT_MOTOR_MAX_RPM;
     private static final double FLYWHEEL_TICKS_PER_MOTOR_REV = 28.0;
+    // REV Hub velocity gains for the back flywheel. I and D are held at zero.
+    // Copy tuned P/F values from PIDTuning; F starts from the new motor's rated speed.
+    private static final double FLY_BACK_P = 100;
+    private static final double FLY_BACK_F = 32767.0 / (FLY_BACK_MOTOR_MAX_RPM
+            * FLYWHEEL_TICKS_PER_MOTOR_REV * FLY_BACK_MOTOR_GEARING / 60.0);
     // Flywheel revolutions per gearbox output revolution.
     private static final double FLYWHEEL_RATIO = 1.0;
     private static final double HEADING_OFFSET_DEGREES = 0.0;
@@ -358,7 +359,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             turretGoalX = diffX + TURRET_OFFSET_X_MM * Math.cos(-currentHeading);
             // The supplied (357, -1687, 42.9 deg) example defines this Y sign:
             // -(216 + 32.6746) = -248.6746 mm.
-            turretGoalY = -(diffY + TURRET_OFFSET_X_MM * Math.sin(-currentHeading));
+            turretGoalY = -(diffY - TURRET_OFFSET_X_MM * Math.sin(-currentHeading));
             // Java atan2 takes Y first: the example's bearing is -13.0159 deg.
             double degrees = Math.toDegrees(Math.atan2(turretGoalY, turretGoalX) + currentHeading);
             // Normalize to [-180, 180); a coincident goal has no defined bearing.

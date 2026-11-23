@@ -17,23 +17,26 @@ import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigu
 @Configurable
 @TeleOp(name = "PIDTuning", group = "Tuning")
 public class PIDTuning extends LinearOpMode {
-    // Direct-drive motor specs shared with flywheelTest.
+    // Legacy direct-drive motor specs used by flywheelTest.
     static final double MOTOR_MAX_RPM = 6000.0;
     static final double MOTOR_TICKS_PER_REV = 28.0;
     // Flywheel revolutions per gearbox output revolution.
     static final double FLYWHEEL_RATIO = 1.0;
 
-    // Match the geared goBILDA Yellow Jacket front motor in JackbotsTeleOp.
+    // Both flywheels now use the same geared goBILDA Yellow Jacket motor.
     private static final double FRONT_MOTOR_MAX_RPM = 1150.0;
     private static final double FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
     private static final double FRONT_TICKS_PER_REV = MOTOR_TICKS_PER_REV * FRONT_MOTOR_GEARING;
+    private static final double BACK_MOTOR_MAX_RPM = FRONT_MOTOR_MAX_RPM;
+    private static final double BACK_MOTOR_GEARING = FRONT_MOTOR_GEARING;
+    private static final double BACK_TICKS_PER_REV = FRONT_TICKS_PER_REV;
     private static final double[] MAX_FLYWHEEL_RPM = {
-            FRONT_MOTOR_MAX_RPM * FLYWHEEL_RATIO, MOTOR_MAX_RPM * FLYWHEEL_RATIO
+            FRONT_MOTOR_MAX_RPM * FLYWHEEL_RATIO, BACK_MOTOR_MAX_RPM * FLYWHEEL_RATIO
     };
     private static final double RPM_STEP = 100.0;
     private static final double RPM_TOLERANCE = 50.0;
     private static final double FRONT_STARTING_F = startingF(FRONT_MOTOR_MAX_RPM, FRONT_TICKS_PER_REV);
-    private static final double BACK_STARTING_F = startingF(MOTOR_MAX_RPM, MOTOR_TICKS_PER_REV);
+    private static final double BACK_STARTING_F = startingF(BACK_MOTOR_MAX_RPM, BACK_TICKS_PER_REV);
     private static final String[] MOTOR_NAMES = {"flyFront", "flyBack"};
     private static final String[] SETTINGS = {"P", "F", "Target RPM"};
     private static final double[] COEFFICIENT_STEPS = {0.001, 0.01, 0.1, 1.0, 10.0};
@@ -44,7 +47,7 @@ public class PIDTuning extends LinearOpMode {
     public static volatile double FRONT_TARGET_RPM = -1000.0;
     public static volatile double BACK_P = 0.0;
     public static volatile double BACK_F = BACK_STARTING_F;
-    public static volatile double BACK_TARGET_RPM = -2100.0;
+    public static volatile double BACK_TARGET_RPM = -1000.0;
 
     private final boolean[] running = new boolean[2];
     private final PIDFCoefficients[] appliedPIDF = new PIDFCoefficients[2];
@@ -75,10 +78,10 @@ public class PIDTuning extends LinearOpMode {
             }
 
             configureMotor(motors[0], FRONT_MOTOR_MAX_RPM, FRONT_MOTOR_GEARING, FRONT_TICKS_PER_REV);
-            configureMotor(motors[1], MOTOR_MAX_RPM, 1.0, MOTOR_TICKS_PER_REV);
+            configureMotor(motors[1], BACK_MOTOR_MAX_RPM, BACK_MOTOR_GEARING, BACK_TICKS_PER_REV);
             double[] ticksPerSecondPerRPM = {
                     FRONT_TICKS_PER_REV / (60.0 * FLYWHEEL_RATIO),
-                    MOTOR_TICKS_PER_REV / (60.0 * FLYWHEEL_RATIO)
+                    BACK_TICKS_PER_REV / (60.0 * FLYWHEEL_RATIO)
             };
             double[] startingF = {FRONT_STARTING_F, BACK_STARTING_F};
 
@@ -86,7 +89,7 @@ public class PIDTuning extends LinearOpMode {
             telemetry.addData("flyFront rated RPM / ticks per output rev", "%.0f / %.1f",
                     FRONT_MOTOR_MAX_RPM, FRONT_TICKS_PER_REV);
             telemetry.addData("flyBack rated RPM / ticks per output rev", "%.0f / %.1f",
-                    MOTOR_MAX_RPM, MOTOR_TICKS_PER_REV);
+                    BACK_MOTOR_MAX_RPM, BACK_TICKS_PER_REV);
             telemetry.addData("flyFront / flyBack starting F", "%.4f / %.4f (tune under load)",
                     FRONT_STARTING_F, BACK_STARTING_F);
             telemetry.addLine("Both motors start OFF. Tune F first, then P, for each motor.");
