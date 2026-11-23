@@ -26,9 +26,10 @@ import java.util.List;
 @Configurable
 @TeleOp(name = "JackbotsTeleOp")
 public class JackbotsTeleOp extends LinearOpMode {
-    // Negative full power preserves each flywheel's firing direction.
+    // Negative power preserves the front flywheel's spin direction.
     private static final double FLY_FRONT_POWER = -1.0;
-    private static final double FLY_BACK_POWER = -1.0;
+    // Live in Panels under JackbotsTeleOp; negative RPM preserves firing direction.
+    public static volatile double FLY_BACK_TARGET_RPM = -1000.0;
 
     // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
     // shared motor channel: read its encoder directly and keep a software zero.
@@ -67,12 +68,17 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double INTAKE_LEFT_DOWN_POSITION = 0.64;
     private static final double INTAKE_RIGHT_DOWN_POSITION = 0.46;
 
-    // Both flywheels use the same goBILDA Yellow Jacket gearbox (nominally 5.2:1).
+    // Front: geared 1150 RPM goBILDA Yellow Jacket (nominally 5.2:1). Back: direct-drive 6000 RPM.
     private static final double FLY_FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
     private static final double FLY_FRONT_MOTOR_MAX_RPM = 1150.0;
-    private static final double FLY_BACK_MOTOR_GEARING = FLY_FRONT_MOTOR_GEARING;
-    private static final double FLY_BACK_MOTOR_MAX_RPM = FLY_FRONT_MOTOR_MAX_RPM;
+    private static final double FLY_BACK_MOTOR_GEARING = 1.0;
+    private static final double FLY_BACK_MOTOR_MAX_RPM = 6000.0;
     private static final double FLYWHEEL_TICKS_PER_MOTOR_REV = 28.0;
+    // REV Hub velocity gains for the back flywheel. I and D are held at zero.
+    // Copy tuned P/F values from PIDTuning; F starts from the back motor's rated speed.
+    private static final double FLY_BACK_P = 100;
+    private static final double FLY_BACK_F = 32767.0 / (FLY_BACK_MOTOR_MAX_RPM
+            * FLYWHEEL_TICKS_PER_MOTOR_REV * FLY_BACK_MOTOR_GEARING / 60.0);
     // Flywheel revolutions per gearbox output revolution.
     private static final double FLYWHEEL_RATIO = 1.0;
     private static final double HEADING_OFFSET_DEGREES = 0.0;
@@ -147,7 +153,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             configureFlywheel(flyFront, FLY_FRONT_MOTOR_MAX_RPM, FLY_FRONT_MOTOR_GEARING,
                     DcMotor.RunMode.RUN_WITHOUT_ENCODER);
             configureFlywheel(flyBack, FLY_BACK_MOTOR_MAX_RPM, FLY_BACK_MOTOR_GEARING,
-                    DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+                    DcMotor.RunMode.RUN_USING_ENCODER);
+            flyBack.setVelocityPIDFCoefficients(FLY_BACK_P, 0.0, 0.0, FLY_BACK_F);
             configurePinpoint();
             configureTurretEncoder();
             ElapsedTime clock = new ElapsedTime();
@@ -279,9 +286,12 @@ public class JackbotsTeleOp extends LinearOpMode {
                     flywheelsEnabled = !flywheelsEnabled;
                 }
                 double frontFlywheelPower = flywheelsEnabled ? FLY_FRONT_POWER : 0.0;
-                double backFlywheelPower = flywheelsEnabled ? FLY_BACK_POWER : 0.0;
                 flyFront.setPower(frontFlywheelPower);
-                flyBack.setPower(backFlywheelPower);
+                if (flywheelsEnabled) {
+                    flyBack.setVelocity(FLY_BACK_TARGET_RPM * backTicksPerSecondPerRPM);
+                } else {
+                    flyBack.setPower(0.0);
+                }
 
                 telemetry.addData("Color detected", colorDetected);
                 telemetry.addData("Color confirmed (1 second)", colorConfirmed);
@@ -296,7 +306,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 telemetry.addData("Turret LB / RB", "%b / %b", leftBumper, rightBumper);
                 telemetry.addData("Turret commanded power (both servos)", "%.2f", turretPower);
                 telemetry.addData("flyFront power", "%.2f", frontFlywheelPower);
-                telemetry.addData("flyBack power", "%.2f", backFlywheelPower);
+                telemetry.addData("flyBack Target rpm", "%.0f", FLY_BACK_TARGET_RPM);
                 telemetry.addData("flyFront rpm", "%.1f", flyFront.getVelocity() / frontTicksPerSecondPerRPM);
                 telemetry.addData("flyBack rpm", "%.1f", flyBack.getVelocity() / backTicksPerSecondPerRPM);
                 telemetry.update();

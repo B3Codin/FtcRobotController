@@ -17,19 +17,19 @@ import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigu
 @Configurable
 @TeleOp(name = "PIDTuning", group = "Tuning")
 public class PIDTuning extends LinearOpMode {
-    // Legacy direct-drive motor specs used by flywheelTest.
+    // Direct-drive back motor specs, also used by flywheelTest.
     static final double MOTOR_MAX_RPM = 6000.0;
     static final double MOTOR_TICKS_PER_REV = 28.0;
     // Flywheel revolutions per gearbox output revolution.
     static final double FLYWHEEL_RATIO = 1.0;
 
-    // Both flywheels now use the same geared goBILDA Yellow Jacket motor.
+    // The front uses the geared 1150 RPM motor; the back uses the 6000 RPM motor.
     private static final double FRONT_MOTOR_MAX_RPM = 1150.0;
     private static final double FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
     private static final double FRONT_TICKS_PER_REV = MOTOR_TICKS_PER_REV * FRONT_MOTOR_GEARING;
-    private static final double BACK_MOTOR_MAX_RPM = FRONT_MOTOR_MAX_RPM;
-    private static final double BACK_MOTOR_GEARING = FRONT_MOTOR_GEARING;
-    private static final double BACK_TICKS_PER_REV = FRONT_TICKS_PER_REV;
+    private static final double BACK_MOTOR_MAX_RPM = MOTOR_MAX_RPM;
+    private static final double BACK_MOTOR_GEARING = 1.0;
+    private static final double BACK_TICKS_PER_REV = MOTOR_TICKS_PER_REV;
     private static final double[] MAX_FLYWHEEL_RPM = {
             FRONT_MOTOR_MAX_RPM * FLYWHEEL_RATIO, BACK_MOTOR_MAX_RPM * FLYWHEEL_RATIO
     };
