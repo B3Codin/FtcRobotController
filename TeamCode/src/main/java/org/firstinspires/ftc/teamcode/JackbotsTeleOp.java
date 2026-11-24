@@ -72,6 +72,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double INTAKE_RIGHT_UP_POSITION = 0.00;
     private static final double INTAKE_LEFT_DOWN_POSITION = 0.64;
     private static final double INTAKE_RIGHT_DOWN_POSITION = 0.46;
+    private static final double BLOCK_CLOSED_POSITION = 0.1;
+    private static final double BLOCK_OPEN_POSITION = 0.4;
 
     // Front: geared 1150 RPM goBILDA Yellow Jacket (nominally 5.2:1). Back: direct-drive 6000 RPM.
     private static final double FLY_FRONT_MOTOR_GEARING = 1.0 + 46.0 / 11.0;
@@ -102,7 +104,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor rollLeft, rollRight;
     private DcMotorEx flyFront, flyBack;
-    private Servo intakeLeft, intakeRight;
+    private Servo intakeLeft, intakeRight, blockServo;
     private CRServo leftTurretServo, rightTurretServo;
     private GoBildaPinpointDriver odo;
     private List<LynxModule> hubs;
@@ -126,6 +128,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         flyBack = hardwareMap.get(DcMotorEx.class, "flyBack");
         intakeLeft = hardwareMap.get(Servo.class, "intakeLeft");
         intakeRight = hardwareMap.get(Servo.class, "intakeRight");
+        blockServo = hardwareMap.get(Servo.class, "blockServo");
         RevColorSensorV3 colorSensor = hardwareMap.get(RevColorSensorV3.class, "colorSensor");
         ServoImplEx[] indicators = {
                 hardwareMap.get(ServoImplEx.class, "LeftRGB"),
@@ -142,6 +145,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         };
 
         try {
+            blockServo.setPosition(BLOCK_CLOSED_POSITION);
             colorSensor.setGain(COLOR_GAIN);
             for (ServoImplEx indicator : indicators) {
                 indicator.setDirection(Servo.Direction.FORWARD);
@@ -173,7 +177,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addLine("LB/RB: manual turret | Both: stop/clear fault | D-pad Up: toggle auto aim");
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
-            telemetry.addLine("X: toggle flywheels on/off | Y: toggle intake up/down");
+            telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
             telemetry.addLine("Intake starts DOWN. One full second of color raises intake and stops rollers.");
             telemetry.addLine("RGBs are green while color is detected, off when clear.");
             telemetry.addLine("Rollers work only with the intake DOWN.");
@@ -203,7 +207,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             intakeRight.setPosition(INTAKE_RIGHT_DOWN_POSITION);
 
             // A held while pressing START must be released/re-pressed to reset X/Y.
-            boolean previousA = gamepad1.a, previousX = false, previousY = false;
+            boolean previousA = gamepad1.a, previousX = false, previousB = false;
             boolean flywheelsEnabled = false;
             boolean intakeUp = false;
             ColorConfirmation colorConfirmation = new ColorConfirmation();
@@ -214,8 +218,10 @@ public class JackbotsTeleOp extends LinearOpMode {
 
             while (opModeIsActive()) {
                 boolean a = gamepad1.a;
+                boolean b = gamepad1.b;
                 boolean x = gamepad1.x;
                 boolean y = gamepad1.y;
+                blockServo.setPosition(y ? BLOCK_OPEN_POSITION : BLOCK_CLOSED_POSITION);
                 boolean leftBumper = gamepad1.left_bumper;
                 boolean rightBumper = gamepad1.right_bumper;
                 boolean zeroTurret = gamepad1.dpad_down;
@@ -231,7 +237,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                     turret.onStart(zeroTurret, toggleTracking);
                     previousA = a;
                     previousX = x;
-                    previousY = y;
+                    previousB = b;
                     telemetry.addLine("Keep robot still: waiting for starting field pose (198, -217.4 mm).");
                     telemetry.addData("Odometry status", odo.getDeviceStatus());
                     telemetry.update();
@@ -268,7 +274,7 @@ public class JackbotsTeleOp extends LinearOpMode {
 
                 if (colorConfirmed) {
                     intakeUp = true;
-                } else if (y && !previousY) {
+                } else if (b && !previousB) {
                     intakeUp = !intakeUp;
                 }
 
@@ -321,7 +327,7 @@ public class JackbotsTeleOp extends LinearOpMode {
 
                 previousA = a;
                 previousX = x;
-                previousY = y;
+                previousB = b;
                 idle();
             }
         } finally {
@@ -330,6 +336,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             for (DcMotor motor : allMotors) {
                 motor.setPower(0.0);
             }
+            blockServo.setPosition(BLOCK_CLOSED_POSITION);
             for (ServoImplEx indicator : indicators) {
                 indicator.setPosition(RGB_OFF);
             }
