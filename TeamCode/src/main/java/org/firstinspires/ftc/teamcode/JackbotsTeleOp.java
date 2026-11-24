@@ -10,6 +10,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DigitalChannel;
 import com.qualcomm.robotcore.hardware.NormalizedRGBA;
 import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -47,6 +48,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     public static volatile double TURRET_MAX_SPEED = 1.0;
     // Automatic aiming stops within +/- this many degrees of IdealTheta.
     public static volatile double TURRET_TOLERANCE_DEGREES = 3.0;
+    // Live in Panels. Angle assigned on the next negative-side magnet entry.
+    public static volatile double TURRET_MAGNET_ANGLE_DEGREES = 0.0;
 
     private static TurretAimController.Settings turretSettings() {
         // PIDF covers the entire +/-180 degree travel range (up to 360 degrees of error).
@@ -104,6 +107,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     private GoBildaPinpointDriver odo;
     private List<LynxModule> hubs;
     private LynxModule turretEncoderHub;
+    private DigitalChannel turretMagnet;
+    private boolean turretMagnetDetected;
     private final ElapsedTime pinpointStartupClock = new ElapsedTime();
     private final StartingPose startingPose = new StartingPose();
     // Preserve field coordinates when A resets the displayed local odometry X/Y.
@@ -160,7 +165,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             configurePinpoint();
             configureTurretEncoder();
             ElapsedTime clock = new ElapsedTime();
-            TurretTracking turret = new TurretTracking(sampleSensors(), gamepad1.dpad_down);
+            TurretTracking turret = new TurretTracking(sampleSensors(), gamepad1.dpad_down,
+                    turretMagnetDetected);
 
             telemetry.setMsTransmissionInterval(100);
             telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
@@ -175,7 +181,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
             while (opModeInInit()) {
-                turret.initSample(sampleSensors(), gamepad1.dpad_down);
+                turret.initSample(sampleSensors(), gamepad1.dpad_down,
+                        turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES);
                 Pose2D pose = odo.getPosition();
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
                 telemetry.addLine("Align turret straight-ahead mark, then press D-pad Down to set zero.");
@@ -222,7 +229,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 if (!startingPose.initialized) {
                     // START can arrive before calibration finishes. Keep outputs at
                     // their initialized zero power until the field pose is read back.
-                    turret.initSample(turretEncoderTicks, zeroTurret);
+                    turret.initSample(turretEncoderTicks, zeroTurret,
+                            turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES);
                     turret.onStart(zeroTurret, toggleTracking);
                     previousA = a;
                     previousX = x;
@@ -279,7 +287,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 double idealTheta = calculateAndReportTurretTarget(pose);
                 double turretPower = turret.update(turretEncoderTicks, clock.seconds(),
                         odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
-                        idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper, turretSettings());
+                        idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper,
+                        turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES, turretSettings());
                 // Both CR servos drive one turret and share the same controller output.
                 leftTurretServo.setPower(turretPower);
                 rightTurretServo.setPower(turretPower);
@@ -371,6 +380,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     }
 
     private void configureTurretEncoder() {
+        turretMagnet = hardwareMap.get(DigitalChannel.class, "limitSwitch");
+        turretMagnet.setMode(DigitalChannel.Mode.INPUT);
         hubs = hardwareMap.getAll(LynxModule.class);
         for (LynxModule hub : hubs) {
             if (!hub.isParent()) {
@@ -404,6 +415,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         if (encoderData.isFake()) {
             throw new IllegalStateException("Turret encoder read failed; stopping OpMode.");
         }
+        turretMagnetDetected = !turretMagnet.getState();
         return encoderData.getMotorCurrentPosition(TURRET_ENCODER_PORT);
     }
 
@@ -426,10 +438,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     private void addTurretTelemetry(TurretTracking turret) {
         telemetry.addData("Turret auto requested", turret.trackingRequested);
         telemetry.addData("Turret zero", turret.zeroEstablished
-                ? "Straight-ahead mark" : "Align straight-ahead mark and press D-pad Down");
+                ? "Calibrated" : "Use magnet entry or straight-ahead mark + D-pad Down");
         telemetry.addData("Turret state", turret.state());
         telemetry.addData("Turret angle (Degrees)", "%.2f", turret.angleDegrees());
-        telemetry.addData("Turret encoder ticks (from zero)", turret.signedTicks);
+        telemetry.addData("Turret encoder ticks (from reference)", turret.signedTicks);
         telemetry.addData("Turret controller target (Degrees)", "%.2f", turret.controller.getTargetDegrees());
         telemetry.addData("Turret P / I / D / F", "%.5f / %.5f / %.5f / %.3f",
                 TURRET_P, TURRET_I, TURRET_D, TURRET_F);
@@ -440,24 +452,23 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     /** Hardware-independent input handling around the existing turret controller. */
     static final class TurretTracking {
-        private static final int ENCODER_SIGN = 1;
-        private static final double TICKS_PER_DEGREE = 8192.0 * (90.0 / 24.0) / 360.0;
         final TurretAimController controller = new TurretAimController(false, false, false);
-        private int zeroTicks;
+        private final TurretMagnetZero encoder = new TurretMagnetZero();
         private long signedTicks;
         private boolean zeroEstablished;
         private boolean trackingRequested = true;
         private boolean trackingActive;
         private boolean previousZero, previousToggle;
 
-        TurretTracking(int rawTicks, boolean zeroHeld) {
-            zeroTicks = rawTicks;
+        TurretTracking(int rawTicks, boolean zeroHeld, boolean magnetDetected) {
+            encoder.update(rawTicks, magnetDetected);
             previousZero = zeroHeld;
         }
 
-        void initSample(int rawTicks, boolean zero) {
-            if (zero && !previousZero) calibrate(rawTicks);
-            signedTicks = ENCODER_SIGN * ((long) rawTicks - zeroTicks);
+        void initSample(int rawTicks, boolean zero, boolean magnetDetected, double magnetAngleDegrees) {
+            if (encoder.update(rawTicks, magnetDetected, magnetAngleDegrees)) zeroEstablished = true;
+            if (zero && !previousZero) calibrate();
+            signedTicks = encoder.zeroedTicks();
             previousZero = zero;
         }
 
@@ -468,11 +479,19 @@ public class JackbotsTeleOp extends LinearOpMode {
 
         double update(int rawTicks, double now, boolean odometryReady, double idealTheta,
                       boolean zero, boolean toggle, boolean lb, boolean rb,
+                      boolean magnetDetected, double magnetAngleDegrees,
                       TurretAimController.Settings settings) {
+            boolean magnetCorrected = encoder.update(rawTicks, magnetDetected, magnetAngleDegrees);
+            if (magnetCorrected) zeroEstablished = true;
             boolean zeroPressed = zero && !previousZero;
-            if (zeroPressed) calibrate(rawTicks);
-            signedTicks = ENCODER_SIGN * ((long) rawTicks - zeroTicks);
+            if (zeroPressed) calibrate();
+            signedTicks = encoder.zeroedTicks();
             if (zeroPressed) controller.cancel(angleDegrees(), signedTicks, now);
+            else if (magnetCorrected) {
+                // Clear motion history after changing the reference, preserving auto aim
+                // and fault state. The controller computes power again this same loop.
+                controller.rebase(angleDegrees(), signedTicks, now);
+            }
             if (toggle && !previousToggle) trackingRequested = !trackingRequested;
             previousZero = zero;
             previousToggle = toggle;
@@ -496,17 +515,17 @@ public class JackbotsTeleOp extends LinearOpMode {
             return power;
         }
 
-        private void calibrate(int rawTicks) {
-            zeroTicks = rawTicks;
+        private void calibrate() {
+            encoder.setAngleDegrees(0.0);
             zeroEstablished = true;
         }
 
         double angleDegrees() {
-            return signedTicks / TICKS_PER_DEGREE;
+            return encoder.angleDegrees();
         }
 
         String state() {
-            if (trackingRequested && !zeroEstablished) return "Waiting for straight-ahead zero";
+            if (trackingRequested && !zeroEstablished) return "Waiting for turret calibration";
             if (trackingRequested && !trackingActive && !previousZero) return "Waiting for odometry READY";
             return controller.getState();
         }

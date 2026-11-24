@@ -11,6 +11,13 @@ public final class TurretMagnetZeroTest {
         }
     }
 
+    private static void expectAngle(double expected, double actual, String message) {
+        checks++;
+        if (!Double.isFinite(actual) || Math.abs(actual - expected) > 1e-9) {
+            throw new AssertionError(message + ": expected " + expected + ", got " + actual);
+        }
+    }
+
     public static void main(String[] args) {
         TurretMagnetZero zero = new TurretMagnetZero();
         zero.update(1000, false);
@@ -53,6 +60,31 @@ public final class TurretMagnetZeroTest {
         expect(0, delayedDetection, "Retain approach direction across a stationary sample");
         delayedDetection.update(130, true);
         expect(10, delayedDetection, "Raw startup count does not define physical magnet side");
+
+        TurretMagnetZero angles = new TurretMagnetZero();
+        angles.update(12345, false, 7.25);
+        expectAngle(0, angles.angleDegrees(), "Corrected angle starts at zero with nonzero raw ticks");
+        expectAngle(0, angles.unzeroedAngleDegrees(), "Uncorrected angle uses the same startup reference");
+        angles.update(12089, false, 7.25);
+        expectAngle(-3, angles.angleDegrees(), "Corrected angle uses turret gearing");
+        expectAngle(-3, angles.unzeroedAngleDegrees(), "Both angles match before magnet entry");
+        angles.update(12345, true, 7.25);
+        expectAngle(7.25, angles.angleDegrees(), "Entry applies fractional configured degrees");
+        expectAngle(0, angles.unzeroedAngleDegrees(), "Entry leaves startup reference intact");
+        angles.update(12601, true, -12.5);
+        expectAngle(10.25, angles.angleDegrees(), "Corrected angle advances without reapplying edited setting");
+        expectAngle(3, angles.unzeroedAngleDegrees(), "Uncorrected angle advances independently");
+        angles.update(12089, false, -12.5);
+        angles.update(12345, true, -12.5);
+        expectAngle(-12.5, angles.angleDegrees(), "Next entry uses new negative setting");
+        expectAngle(0, angles.unzeroedAngleDegrees(), "Repeated corrections never change startup reference");
+        angles.update(12601, true, -12.5);
+        angles.setAngleDegrees(0);
+        expectAngle(0, angles.angleDegrees(), "Manual calibration sets zero despite configured magnet offset");
+        expectAngle(3, angles.unzeroedAngleDegrees(), "Manual calibration preserves startup reference");
+        angles.update(12089, false, 0);
+        angles.update(12345, true, Double.NaN);
+        expectAngle(-3, angles.angleDegrees(), "Invalid magnet setting cannot corrupt the reference");
         System.out.println("Passed " + checks + " magnet zero checks.");
     }
 }
