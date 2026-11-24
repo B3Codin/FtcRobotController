@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.bylazar.configurables.annotations.Configurable;
+import com.pedropathing.revhub.localizers.PinpointConfig;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.hardware.rev.RevColorSensorV3;
@@ -19,6 +20,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
+import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 import java.util.List;
 
@@ -109,10 +111,10 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     @Override
     public void runOpMode() {
-        frontLeft = hardwareMap.get(DcMotor.class, "FLeft");
-        frontRight = hardwareMap.get(DcMotor.class, "FRight");
-        backLeft = hardwareMap.get(DcMotor.class, "BLeft");
-        backRight = hardwareMap.get(DcMotor.class, "BRight");
+        frontLeft = hardwareMap.get(DcMotor.class, Constants.drivetrainConfig.frontLeftName.get());
+        frontRight = hardwareMap.get(DcMotor.class, Constants.drivetrainConfig.frontRightName.get());
+        backLeft = hardwareMap.get(DcMotor.class, Constants.drivetrainConfig.backLeftName.get());
+        backRight = hardwareMap.get(DcMotor.class, Constants.drivetrainConfig.backRightName.get());
         rollLeft = hardwareMap.get(DcMotor.class, "rollLeft");
         rollRight = hardwareMap.get(DcMotor.class, "rollRight");
         flyFront = hardwareMap.get(DcMotorEx.class, "flyFront");
@@ -127,7 +129,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         // Keep the configuration names (including spelling) from CRServosTest.
         leftTurretServo = hardwareMap.get(CRServo.class, "leftTurretServo");
         rightTurretServo = hardwareMap.get(CRServo.class, "rightTurretServo");
-        odo = hardwareMap.get(GoBildaPinpointDriver.class, "odo");
+        odo = hardwareMap.get(GoBildaPinpointDriver.class, Constants.localizerConfig.name.get());
 
         DcMotor[] allMotors = {
                 frontLeft, frontRight, backLeft, backRight,
@@ -143,11 +145,11 @@ public class JackbotsTeleOp extends LinearOpMode {
             }
             leftTurretServo.setPower(0.0);
             rightTurretServo.setPower(0.0);
-            // Same drive motor names and directions as Emily.
-            configurePowerMotor(frontLeft, DcMotor.Direction.FORWARD);
-            configurePowerMotor(backLeft, DcMotor.Direction.FORWARD);
-            configurePowerMotor(frontRight, DcMotor.Direction.REVERSE);
-            configurePowerMotor(backRight, DcMotor.Direction.REVERSE);
+            // Share the hardware configuration used by Pedro Auto Tune and autonomous.
+            configurePowerMotor(frontLeft, Constants.drivetrainConfig.frontLeftDirection.get());
+            configurePowerMotor(backLeft, Constants.drivetrainConfig.backLeftDirection.get());
+            configurePowerMotor(frontRight, Constants.drivetrainConfig.frontRightDirection.get());
+            configurePowerMotor(backRight, Constants.drivetrainConfig.backRightDirection.get());
             configurePowerMotor(rollLeft, DcMotor.Direction.FORWARD);
             configurePowerMotor(rollRight, DcMotor.Direction.REVERSE);
             configureFlywheel(flyFront, FLY_FRONT_MOTOR_MAX_RPM, FLY_FRONT_MOTOR_GEARING,
@@ -552,12 +554,16 @@ public class JackbotsTeleOp extends LinearOpMode {
     }
 
     private void configurePinpoint() {
-        // Same measured offsets and pod type as TurretAimTest.
-        odo.setOffsets(0.4161412697138749, -2.594972445270208, DistanceUnit.INCH);
-        odo.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
-        // Match the physically verified X-pod correction in TurretAimTest.
-        odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
-                GoBildaPinpointDriver.EncoderDirection.FORWARD);
+        // Read the tuned values directly so TeleOp stays aligned with autonomous.
+        PinpointConfig config = Constants.localizerConfig;
+        odo.setOffsets(config.xPodOffset.get(), config.yPodOffset.get(), config.offsetUnits.get());
+        if (config.ticksPerUnit.get().isPresent()) {
+            odo.setEncoderResolution(config.ticksPerUnit.get().getAsDouble(),
+                    config.encoderResolutionUnit.get());
+        } else {
+            odo.setEncoderResolution(config.podType.get());
+        }
+        odo.setEncoderDirections(config.xPodDirection.get(), config.yPodDirection.get());
         // Reset/calibration completes asynchronously. sampleSensors applies the
         // starting pose only after READY, then verifies it from a fresh device read.
         odo.resetPosAndIMU();

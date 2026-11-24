@@ -18,8 +18,8 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
  * Single source of truth for the Pedro Pathing hardware and controller setup.
  *
  * <p>The motor and Pinpoint names below match the configuration currently on the
- * robot's Control Hub. The Pinpoint offsets and Foresight values are deliberately
- * conservative starter values; run the tuners before attempting an autonomous path.
+ * robot's Control Hub. The Pinpoint offsets and Foresight values come from Pedro
+ * Auto Tune. JackbotsTeleOp also reads the shared drivetrain and Pinpoint settings.
  */
 public final class Constants {
     private Constants() {}
@@ -41,7 +41,7 @@ public final class Constants {
         c.xPodDirection.set(GoBildaPinpointDriver.EncoderDirection.FORWARD);
         c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.FORWARD);
 
-        // TODO: replace with measured values from PinpointTuner (in inches).
+        // Measured values from PinpointTuner (in inches).
         c.xPodOffset.set(0.777365616926058);
         c.yPodOffset.set(1.0449010743869571);
     });
