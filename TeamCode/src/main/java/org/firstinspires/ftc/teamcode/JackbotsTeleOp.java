@@ -91,6 +91,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double HEADING_OFFSET_DEGREES = 0.0;
     // Matches the tested direction in RollerTest; the right motor is reversed.
     private static final double INTAKE_ROLLER_POWER = -1.0;
+    private static final double CONFIRMED_BALL_INTAKE_POWER = -0.5;
     // Triggers act as buttons for manual turret control.
     private static final double TURRET_TRIGGER_THRESHOLD = 0.10;
     // ColorSenseTest calibration, applied to every hue.
@@ -179,7 +180,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
-            telemetry.addLine("Intake starts DOWN. 0.25 seconds of continuous color raises intake.");
+            telemetry.addLine("Intake starts DOWN. 0.25 seconds of color raises intake and limits intake power to 0.5.");
             telemetry.addLine("Release Y: lower intake | RGBs: purple, green after 0.25 seconds of color.");
             telemetry.addLine("LB/RB run rollers with the intake UP or DOWN. Held RB overrides intake.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
@@ -273,7 +274,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                     indicator.setPosition(indicatorPosition);
                 }
 
-                double rollerPower = rollers.update(leftBumper, rightBumper);
+                double rollerPower = rollers.update(leftBumper, rightBumper, intake.colorConfirmed);
                 rollLeft.setPower(rollerPower);
                 rollRight.setPower(rollerPower);
                 intakeLeft.setPosition(intake.intakeUp ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
@@ -655,11 +656,12 @@ public class JackbotsTeleOp extends LinearOpMode {
             previousToggle = toggleHeldAtStart;
         }
 
-        double update(boolean toggle, boolean outtake) {
+        double update(boolean toggle, boolean outtake, boolean ballConfirmed) {
             if (toggle && !previousToggle) intakeEnabled = !intakeEnabled;
             previousToggle = toggle;
             if (outtake) return -INTAKE_ROLLER_POWER;
-            return intakeEnabled ? INTAKE_ROLLER_POWER : 0.0;
+            if (!intakeEnabled) return 0.0;
+            return ballConfirmed ? CONFIRMED_BALL_INTAKE_POWER : INTAKE_ROLLER_POWER;
         }
     }
 
