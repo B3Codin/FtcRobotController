@@ -19,7 +19,7 @@ public class blockTest extends LinearOpMode {
         if (Double.isNaN(position) || Double.isInfinite(position)) {
             position = 0.5;
         }
-        position = Math.max(0.0, Math.min(1.0, position));
+        position = Math.max(-1.0, Math.min(1.0, position));
         int stepIndex = 2;
 
         showTelemetry(position, STEP_SIZES[stepIndex]);
