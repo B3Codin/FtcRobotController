@@ -43,11 +43,11 @@ public class JackbotsTeleOp extends LinearOpMode {
     public static volatile double TURRET_P = 0.005;
     public static volatile double TURRET_I = 0.0;
     public static volatile double TURRET_D = 0.0;
-    public static volatile double TURRET_F = 0.11;
+    public static volatile double TURRET_F = 0.08;
     public static volatile double TURRET_MIN_SPEED = 0.1;
     public static volatile double TURRET_MAX_SPEED = 1.0;
     // Automatic aiming stops within +/- this many degrees of IdealTheta.
-    public static volatile double TURRET_TOLERANCE_DEGREES = 3.0;
+    public static volatile double TURRET_TOLERANCE_DEGREES = 2.0;
     // Live in Panels. Angle assigned when startup homing first detects the magnet.
     public static volatile double TURRET_MAGNET_ANGLE_DEGREES = 10.2494;
 
