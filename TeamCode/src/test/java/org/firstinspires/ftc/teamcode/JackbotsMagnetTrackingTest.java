@@ -51,8 +51,8 @@ public final class JackbotsMagnetTrackingTest {
         r.detected = false;
         r.start();
         expect(r.step(0) == 0.1, "START seeks in the positive direction at exactly 0.1");
-        expect(r.step(1, -45, true, false) == 0.1,
-                "Homing precedes normal aiming and single-bumper commands");
+        expect(r.step(1, -45, false, false) == 0.1,
+                "Homing precedes normal aiming without manual input");
         r.detected = true;
         expect(r.step(2) == -0.1, "Sensor detection reverses toward zero at 0.1");
         expect(r.turret.angleDegrees() == 10.2494, "Preserve the configured sensor angle");
@@ -125,7 +125,7 @@ public final class JackbotsMagnetTrackingTest {
 
         r = new Rig();
         r.start();
-        expect(r.step(0, 45, true, true) == 0 && r.turret.state().contains("Cancelled"),
+        expect(r.step(0, 45, true, true) == 0 && !r.turret.state().startsWith("Homing:"),
                 "Both bumpers abort homing");
         expect(r.step(1) == 0, "Releasing bumpers cannot restart cancelled homing");
 
@@ -142,6 +142,62 @@ public final class JackbotsMagnetTrackingTest {
         r.now += 1.1;
         expect(r.step(0) == 0 && r.turret.state().contains("No turret movement"),
                 "A stalled return also stops and latches a fault");
+
+        expect(r.step(0, 45, true, false) == -0.2,
+                "LB recovers manual control after failed return");
+        expect(r.step(-1) == 0, "Manual release after homing failure stays stopped");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        expect(r.step(1, 45, true, false) == -0.2,
+                "LB immediately interrupts homing");
+        expect(r.step(0) == 0, "Homing does not resume after manual release");
+        expect(r.step(0, 45, false, true) == 0.2,
+                "RB works without a magnet calibration");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        r.now += 1.1;
+        r.step(0);
+        expect(r.step(0, 45, false, true) == 0.2,
+                "RB clears a stalled seek even though seek used the same direction");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        r.now += 15;
+        r.step(1);
+        expect(r.turret.update(12345, r.now + 0.05, false, Double.NaN,
+                false, true, false, false, false, r.magnetAngle, r.settings) == 0.1,
+                "D-pad Up retries failed homing without needing odometry READY");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        expect(r.turret.update(12345, r.now + 0.05, false, Double.NaN,
+                false, true, false, false, false, r.magnetAngle, r.settings) == 0,
+                "D-pad Up toggles off during homing");
+        expect(r.turret.update(12345, r.now + 0.10, false, Double.NaN,
+                false, true, false, false, false, r.magnetAngle, r.settings) == 0,
+                "Holding D-pad Up cannot restart homing");
+        r.turret.update(12345, r.now + 0.15, false, Double.NaN,
+                false, false, false, false, false, r.magnetAngle, r.settings);
+        expect(r.turret.update(12345, r.now + 0.20, false, Double.NaN,
+                false, true, false, false, false, r.magnetAngle, r.settings) == 0.1,
+                "A fresh D-pad Up press restarts uncalibrated homing");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        expect(r.turret.update(12345, r.now + 0.05, false, Double.NaN,
+                true, false, false, false, false, r.magnetAngle, r.settings) == 0,
+                "D-pad Down overrides homing and sets a straight reference");
+        expect(r.turret.angleDegrees() == 0, "Manual zero is applied during homing");
+        expect(r.turret.update(12345, r.now + 0.10, false, Double.NaN,
+                false, false, true, false, false, r.magnetAngle, r.settings) == -0.2,
+                "Manual control works while odometry is unavailable");
         System.out.println("Passed " + checks + " Jackbots homing checks.");
     }
 }

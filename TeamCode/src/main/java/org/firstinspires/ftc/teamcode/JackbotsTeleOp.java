@@ -1,7 +1,5 @@
 package org.firstinspires.ftc.teamcode;
 
-import android.graphics.Color;
-
 import com.bylazar.configurables.annotations.Configurable;
 import com.pedropathing.revhub.localizers.PinpointConfig;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
@@ -34,7 +32,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     // Negative power preserves the front flywheel's spin direction.
     private static final double FLY_FRONT_POWER = -1.0;
     // Live in Panels under JackbotsTeleOp; negative RPM preserves firing direction.
-    public static volatile double FLY_BACK_TARGET_RPM = -1000.0;
+    public static volatile double FLY_BACK_TARGET_RPM = -2250.0;
 
     // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
     // shared motor channel: read its encoder directly and keep a software zero.
@@ -99,10 +97,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final float COLOR_GAIN = 2.0f;
     private static final float MIN_COLOR_SIGNAL = 0.005f;
     private static final float MIN_COLOR_SATURATION = 0.20f;
-    // Same 500–2500 us PWM range and hue landmarks as RGBTest.
+    // RGBTest's 500–2500 us PWM range: violet/purple at 1900 us, red at 1100 us.
     private static final double RGB_OFF = 0.0;
-    private static final double[] RGB_HUES = {0, 30.118, 60, 90, 120, 210, 240, 274.615, 282.085};
-    private static final double[] RGB_PULSES = {1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900};
+    private static final double RGB_PURPLE = 0.7;
+    private static final double RGB_RED = 0.3;
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor rollLeft, rollRight;
@@ -153,7 +151,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             for (ServoImplEx indicator : indicators) {
                 indicator.setDirection(Servo.Direction.FORWARD);
                 indicator.setPwmRange(new PwmControl.PwmRange(500, 2500));
-                indicator.setPosition(RGB_OFF);
+                indicator.setPosition(RGB_PURPLE);
             }
             leftTurretServo.setPower(0.0);
             rightTurretServo.setPower(0.0);
@@ -182,7 +180,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
             telemetry.addLine("Intake starts DOWN. 0.5 seconds of continuous color raises intake.");
-            telemetry.addLine("RGBs match the sensed ball color, off when clear.");
+            telemetry.addLine("Release Y: lower intake | RGBs: purple, red after 0.5 seconds of color.");
             telemetry.addLine("LT/RT run rollers with the intake UP or DOWN.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
@@ -191,7 +189,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 Pose2D pose = odo.getPosition();
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
                 telemetry.addLine("START: turret seeks magnet at +0.1, then returns to zero.");
-                telemetry.addLine("Auto aim starts after homing; both bumpers abort homing.");
+                telemetry.addLine("LB/RB override homing | D-pad Up: toggle auto / retry homing.");
                 telemetry.addData("Odometry status", odo.getDeviceStatus());
                 telemetry.addData("Starting field pose applied", startingPose.initialized);
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
@@ -210,11 +208,9 @@ public class JackbotsTeleOp extends LinearOpMode {
             intakeRight.setPosition(INTAKE_RIGHT_DOWN_POSITION);
 
             // A held while pressing START must be released/re-pressed to reset X/Y.
-            boolean previousA = gamepad1.a, previousX = false, previousB = false;
+            boolean previousA = gamepad1.a, previousX = false;
             boolean flywheelsEnabled = false;
-            boolean intakeUp = false;
-            ColorConfirmation colorConfirmation = new ColorConfirmation();
-            float[] ballHsv = new float[3];
+            IntakeControl intake = new IntakeControl(gamepad1.y);
             double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
             double backTicksPerSecondPerRPM = flyBack.getMotorType().getTicksPerRev()
@@ -235,21 +231,12 @@ public class JackbotsTeleOp extends LinearOpMode {
 
                 int turretEncoderTicks = sampleSensors();
                 if (!startingPose.initialized) {
-                    // START can arrive before calibration finishes. Keep outputs at
-                    // their initialized zero power until the field pose is read back.
-                    turret.initSample(turretEncoderTicks, zeroTurret);
-                    turret.onStart(zeroTurret, toggleTracking);
-                    previousA = a;
-                    previousX = x;
-                    previousB = b;
+                    // Only field-relative drive/aim need the starting pose. Keep
+                    // mechanism inputs and turret recovery available while waiting.
                     telemetry.addLine("Keep robot still: waiting for starting field pose (198, -217.4 mm).");
-                    telemetry.addData("Odometry status", odo.getDeviceStatus());
-                    telemetry.update();
-                    idle();
-                    continue;
                 }
                 Pose2D pose = odo.getPosition();
-                if (a && !previousA) {
+                if (startingPose.initialized && a && !previousA) {
                     // Reset distance once per press without changing field-drive alignment
                     // or moving the field goals / goal-selection boundary.
                     fieldOriginXMM += pose.getX(DistanceUnit.MM);
@@ -267,26 +254,22 @@ public class JackbotsTeleOp extends LinearOpMode {
                         - fieldRight * Math.sin(heading);
                 double robotRight = fieldForward * Math.sin(heading)
                         + fieldRight * Math.cos(heading);
-                drive(robotForward, robotRight, gamepad1.right_stick_x);
+                if (startingPose.initialized) {
+                    drive(robotForward, robotRight, gamepad1.right_stick_x);
+                } else {
+                    drive(0.0, 0.0, 0.0);
+                }
 
                 NormalizedRGBA colors = colorSensor.getNormalizedColors();
                 float peak = Math.max(colors.red, Math.max(colors.green, colors.blue));
                 int red = scaleColorChannel(colors.red, peak);
                 int green = scaleColorChannel(colors.green, peak);
                 int blue = scaleColorChannel(colors.blue, peak);
-                // Scale before HSV conversion to preserve hue in dim sensor readings.
-                Color.RGBToHSV(red, green, blue, ballHsv);
                 boolean colorDetected = detectsColor(colors);
-                boolean colorConfirmed = colorConfirmation.update(colorDetected, clock.seconds());
-                double indicatorPosition = colorDetected ? rgbPositionForHue(ballHsv[0]) : RGB_OFF;
+                intake.update(colorDetected, clock.seconds(), y, b);
+                double indicatorPosition = intake.colorConfirmed ? RGB_RED : RGB_PURPLE;
                 for (ServoImplEx indicator : indicators) {
                     indicator.setPosition(indicatorPosition);
-                }
-
-                if (colorConfirmed) {
-                    intakeUp = true;
-                } else if (b && !previousB) {
-                    intakeUp = !intakeUp;
                 }
 
                 double rollerPower = 0.0;
@@ -295,12 +278,12 @@ public class JackbotsTeleOp extends LinearOpMode {
                 }
                 rollLeft.setPower(rollerPower);
                 rollRight.setPower(rollerPower);
-                intakeLeft.setPosition(intakeUp ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
-                intakeRight.setPosition(intakeUp ? INTAKE_RIGHT_UP_POSITION : INTAKE_RIGHT_DOWN_POSITION);
+                intakeLeft.setPosition(intake.intakeUp ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
+                intakeRight.setPosition(intake.intakeUp ? INTAKE_RIGHT_UP_POSITION : INTAKE_RIGHT_DOWN_POSITION);
 
                 double idealTheta = calculateAndReportTurretTarget(pose);
                 double turretPower = turret.update(turretEncoderTicks, clock.seconds(),
-                        odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
+                        startingPose.initialized && odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
                         idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper,
                         turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES, turretSettings());
                 // Both CR servos drive one turret and share the same controller output.
@@ -319,8 +302,9 @@ public class JackbotsTeleOp extends LinearOpMode {
                 }
 
                 telemetry.addData("Color detected", colorDetected);
+                telemetry.addData("Ball confirmed (0.5 seconds)", intake.colorConfirmed);
                 telemetry.addData("Ball RGB (0-255, peak-scaled)", "R %d | G %d | B %d", red, green, blue);
-                telemetry.addData("Intake", intakeUp ? "UP" : "DOWN");
+                telemetry.addData("Intake", intake.intakeUp ? "UP" : "DOWN");
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
@@ -338,7 +322,6 @@ public class JackbotsTeleOp extends LinearOpMode {
 
                 previousA = a;
                 previousX = x;
-                previousB = b;
                 idle();
             }
         } finally {
@@ -511,27 +494,43 @@ public class JackbotsTeleOp extends LinearOpMode {
                       boolean zero, boolean toggle, boolean lb, boolean rb,
                       boolean magnetDetected, double magnetAngleDegrees,
                       TurretAimController.Settings settings) {
-            // TeleOp applies the magnet reference only in the startup sequence below.
-            // All later samples track encoder motion without any magnet correction.
+            // Apply the magnet reference only during homing, including explicit retries.
             encoder.update(rawTicks, false);
             signedTicks = encoder.zeroedTicks();
-            if (homing != Homing.COMPLETE) {
-                previousZero = zero;
-                previousToggle = toggle;
-                if (homing == Homing.WAITING_FOR_START || homing == Homing.FAILED) return 0.0;
-                if (lb && rb) return failHoming("Cancelled by both bumpers", now);
-                return updateHoming(magnetDetected, magnetAngleDegrees, now);
-            }
+            if (homing == Homing.WAITING_FOR_START) return 0.0;
             boolean zeroPressed = zero && !previousZero;
-            if (zeroPressed) calibrate();
-            signedTicks = encoder.zeroedTicks();
-            if (zeroPressed) controller.cancel(angleDegrees(), signedTicks, now);
-            if (toggle && !previousToggle) trackingRequested = !trackingRequested;
+            boolean togglePressed = toggle && !previousToggle;
             previousZero = zero;
             previousToggle = toggle;
+
+            // Process driver commands before homing/fault states can return early.
+            if (zeroPressed) {
+                calibrate();
+                signedTicks = encoder.zeroedTicks();
+                finishHomingForDriver(now, settings);
+            }
+            if (togglePressed) {
+                trackingRequested = !trackingRequested;
+                if (!trackingRequested && homing != Homing.COMPLETE) {
+                    finishHomingForDriver(now, settings);
+                } else if (trackingRequested && (!zeroEstablished || homing == Homing.FAILED)) {
+                    finishHomingForDriver(now, settings);
+                    homing = Homing.SEEKING_MAGNET;
+                    homingStarted = Double.NaN;
+                    homingSettledSince = Double.NaN;
+                }
+            }
             // Preserve JackbotsTeleOp's manual directions: LB negative, RB positive.
             // Any manual input leaves auto off until D-pad Up explicitly resumes it.
-            if (lb || rb) trackingRequested = false;
+            if (lb || rb) {
+                trackingRequested = false;
+                if (homing != Homing.COMPLETE) finishHomingForDriver(now, settings);
+            }
+            if (homing == Homing.FAILED) return 0.0;
+            if (homing != Homing.COMPLETE) {
+                if (zero) return 0.0;
+                return updateHoming(magnetDetected, magnetAngleDegrees, now);
+            }
             if (!trackingRequested || zero) {
                 trackingActive = false;
             } else if (zeroEstablished && odometryReady) {
@@ -547,6 +546,17 @@ public class JackbotsTeleOp extends LinearOpMode {
                 return 0.0;
             }
             return power;
+        }
+
+        private void finishHomingForDriver(double now, TurretAimController.Settings settings) {
+            homing = Homing.COMPLETE;
+            homingFault = null;
+            trackingActive = false;
+            // Explicit driver recovery clears the old homing fault; new motion still
+            // uses the controller's travel limits, stall and direction checks.
+            controller.update(angleDegrees(), signedTicks, now,
+                    true, true, false, false, false, settings);
+            controller.cancel(angleDegrees(), signedTicks, now);
         }
 
         private double updateHoming(boolean magnetDetected, double magnetAngleDegrees, double now) {
@@ -584,7 +594,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                     return power;
                 }
             }
-            // The magnet is ignored throughout the return and for the rest of this OpMode.
+            // The magnet is ignored throughout the return and normal tracking.
             double power = controller.update(angleDegrees(), signedTicks, now,
                     false, false, false, false, false, HOMING_SETTINGS, true, 0.0);
             if (controller.getState().startsWith("FAULT:")) {
@@ -624,7 +634,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             if (homing == Homing.WAITING_FOR_START) return "Waiting for START to home turret";
             if (homing == Homing.SEEKING_MAGNET) return "Homing: seeking magnet at +0.1";
             if (homing == Homing.RETURNING_TO_ZERO) return "Homing: returning to zero";
-            if (homing == Homing.FAILED) return "Homing FAULT: " + homingFault + " (restart OpMode to retry)";
+            if (homing == Homing.FAILED) return "Homing FAULT: " + homingFault
+                    + " (LB/RB: manual | D-pad Up: retry | D-pad Down: set straight zero)";
             if (trackingRequested && !zeroEstablished) return "Waiting for turret calibration";
             if (trackingRequested && !trackingActive && !previousZero) return "Waiting for odometry READY";
             return controller.getState();
@@ -635,23 +646,28 @@ public class JackbotsTeleOp extends LinearOpMode {
         return peak <= 0 ? 0 : Math.max(0, Math.min(255, Math.round(channel / peak * 255)));
     }
 
-    private static double rgbPositionForHue(double hue) {
-        // The indicators approximate hue; they cannot reproduce arbitrary RGB brightness.
-        int last = RGB_HUES.length - 1;
-        double pulse = RGB_PULSES[last];
-        if (hue > RGB_HUES[last]) {
-            // Unsupported hues between violet and red use the nearer endpoint.
-            pulse = 360 - hue < hue - RGB_HUES[last] ? RGB_PULSES[0] : RGB_PULSES[last];
-        } else {
-            for (int i = 1; i < RGB_HUES.length; i++) {
-                if (hue <= RGB_HUES[i]) {
-                    double fraction = (hue - RGB_HUES[i - 1]) / (RGB_HUES[i] - RGB_HUES[i - 1]);
-                    pulse = RGB_PULSES[i - 1] + fraction * (RGB_PULSES[i] - RGB_PULSES[i - 1]);
-                    break;
-                }
-            }
+    /** Intake and indicator state; Y release takes priority over a previous detection. */
+    static final class IntakeControl {
+        private final ColorConfirmation confirmation = new ColorConfirmation();
+        private boolean previousY, previousB;
+        boolean intakeUp, colorConfirmed;
+
+        IntakeControl(boolean yHeldAtStart) {
+            previousY = yHeldAtStart;
         }
-        return (pulse - 500.0) / 2000.0;
+
+        void update(boolean detected, double now, boolean y, boolean b) {
+            if (previousY && !y) {
+                intakeUp = false;
+                colorConfirmed = confirmation.update(false, now);
+            } else {
+                colorConfirmed = confirmation.update(detected, now);
+                if (colorConfirmed) intakeUp = true;
+                else if (b && !previousB) intakeUp = !intakeUp;
+            }
+            previousY = y;
+            previousB = b;
+        }
     }
 
     /** Require uninterrupted detection; every clear reading starts the wait over. */

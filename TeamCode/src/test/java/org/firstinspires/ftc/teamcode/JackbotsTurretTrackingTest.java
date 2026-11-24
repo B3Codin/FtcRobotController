@@ -2,8 +2,8 @@ package org.firstinspires.ftc.teamcode;
 
 /** Standalone tests of JackbotsTeleOp's actual encoder/auto/manual coordination. */
 public final class JackbotsTurretTrackingTest {
-    private static final double START_TARGET = new JackbotsTeleOp.TurretTarget(
-            357, -1687, Math.toRadians(42.9)).idealTheta;
+    // Keep controller direction checks independent of the field-coordinate example.
+    private static final double START_TARGET = -55.92;
     private static int checks;
 
     private static void expect(boolean condition, String message) {
@@ -49,7 +49,7 @@ public final class JackbotsTurretTrackingTest {
         expect(Math.abs(example.diffY - 216) < 1e-9, "Example DiffY is goal minus robot");
         expect(Math.abs(example.turretGoalX - 1075.8) < 0.05, "Example TurretGoalX rounds to 1075.8");
         expect(Math.abs(example.turretGoalY + 248.7) < 0.05, "Example TurretGoalY rounds to -248.7");
-        expect(Math.abs(example.idealTheta + 55.92) < 0.005, "Example IdealTheta rounds to -55.92");
+        expect(Math.abs(example.idealTheta - 29.88) < 0.005, "Example IdealTheta rounds to 29.88");
         expect(!new JackbotsTeleOp.TurretTarget(1829, 0, 0).useGoalTwo,
                 "Exact selection boundary retains goal one");
         JackbotsTeleOp.TurretTarget secondGoal = new JackbotsTeleOp.TurretTarget(2500, -1000, 0);
