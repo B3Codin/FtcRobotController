@@ -181,9 +181,9 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
-            telemetry.addLine("Intake starts DOWN. B toggles intake up/down.");
+            telemetry.addLine("Intake starts DOWN. 0.5 seconds of continuous color raises intake.");
             telemetry.addLine("RGBs match the sensed ball color, off when clear.");
-            telemetry.addLine("Rollers work only with the intake DOWN.");
+            telemetry.addLine("LT/RT run rollers with the intake UP or DOWN.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
             while (opModeInInit()) {
@@ -213,6 +213,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             boolean previousA = gamepad1.a, previousX = false, previousB = false;
             boolean flywheelsEnabled = false;
             boolean intakeUp = false;
+            ColorConfirmation colorConfirmation = new ColorConfirmation();
             float[] ballHsv = new float[3];
             double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
@@ -276,17 +277,20 @@ public class JackbotsTeleOp extends LinearOpMode {
                 // Scale before HSV conversion to preserve hue in dim sensor readings.
                 Color.RGBToHSV(red, green, blue, ballHsv);
                 boolean colorDetected = detectsColor(colors);
+                boolean colorConfirmed = colorConfirmation.update(colorDetected, clock.seconds());
                 double indicatorPosition = colorDetected ? rgbPositionForHue(ballHsv[0]) : RGB_OFF;
                 for (ServoImplEx indicator : indicators) {
                     indicator.setPosition(indicatorPosition);
                 }
 
-                if (b && !previousB) {
+                if (colorConfirmed) {
+                    intakeUp = true;
+                } else if (b && !previousB) {
                     intakeUp = !intakeUp;
                 }
 
                 double rollerPower = 0.0;
-                if (!intakeUp && leftTrigger != rightTrigger) {
+                if (leftTrigger != rightTrigger) {
                     rollerPower = leftTrigger ? INTAKE_ROLLER_POWER : -INTAKE_ROLLER_POWER;
                 }
                 rollLeft.setPower(rollerPower);
@@ -648,6 +652,21 @@ public class JackbotsTeleOp extends LinearOpMode {
             }
         }
         return (pulse - 500.0) / 2000.0;
+    }
+
+    /** Require uninterrupted detection; every clear reading starts the wait over. */
+    static final class ColorConfirmation {
+        private static final double REQUIRED_SECONDS = 0.5;
+        private double detectedSince = Double.NaN;
+
+        boolean update(boolean detected, double nowSeconds) {
+            if (!detected) {
+                detectedSince = Double.NaN;
+                return false;
+            }
+            if (Double.isNaN(detectedSince)) detectedSince = nowSeconds;
+            return nowSeconds - detectedSince >= REQUIRED_SECONDS;
+        }
     }
 
     private static boolean detectsColor(NormalizedRGBA colors) {
