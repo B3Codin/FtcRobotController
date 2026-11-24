@@ -91,8 +91,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final double HEADING_OFFSET_DEGREES = 0.0;
     // Matches the tested direction in RollerTest; the right motor is reversed.
     private static final double INTAKE_ROLLER_POWER = -1.0;
-    // Triggers act as buttons: above this threshold runs the rollers at full power.
-    private static final double ROLLER_TRIGGER_THRESHOLD = 0.10;
+    // Triggers act as buttons for manual turret control.
+    private static final double TURRET_TRIGGER_THRESHOLD = 0.10;
     // ColorSenseTest calibration, applied to every hue.
     private static final float COLOR_GAIN = 2.0f;
     private static final float MIN_COLOR_SIGNAL = 0.005f;
@@ -174,14 +174,14 @@ public class JackbotsTeleOp extends LinearOpMode {
 
             telemetry.setMsTransmissionInterval(100);
             telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
-            telemetry.addLine("A: reset local X/Y (preserve field aim) | LT: intake | RT: outtake");
-            telemetry.addLine("LB/RB: manual turret | Both: stop/clear fault | D-pad Up: toggle auto aim");
+            telemetry.addLine("A: reset local X/Y (preserve field aim) | LB: toggle intake | Hold RB: outtake");
+            telemetry.addLine("LT/RT: manual turret | Both: stop/clear fault | D-pad Up: toggle auto aim");
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
             telemetry.addLine("Intake starts DOWN. 0.25 seconds of continuous color raises intake.");
             telemetry.addLine("Release Y: lower intake | RGBs: purple, green after 0.25 seconds of color.");
-            telemetry.addLine("LT/RT run rollers with the intake UP or DOWN.");
+            telemetry.addLine("LB/RB run rollers with the intake UP or DOWN. Held RB overrides intake.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
             while (opModeInInit()) {
@@ -189,7 +189,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 Pose2D pose = odo.getPosition();
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
                 telemetry.addLine("START: turret seeks magnet at +0.1, then returns to zero.");
-                telemetry.addLine("LB/RB override homing | D-pad Up: toggle auto / retry homing.");
+                telemetry.addLine("LT/RT override homing | D-pad Up: toggle auto / retry homing.");
                 telemetry.addData("Odometry status", odo.getDeviceStatus());
                 telemetry.addData("Starting field pose applied", startingPose.initialized);
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
@@ -211,6 +211,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             boolean previousA = gamepad1.a, previousX = false;
             boolean flywheelsEnabled = false;
             IntakeControl intake = new IntakeControl(gamepad1.y);
+            RollerControl rollers = new RollerControl(gamepad1.left_bumper);
             double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
             double backTicksPerSecondPerRPM = flyBack.getMotorType().getTicksPerRev()
@@ -226,8 +227,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 boolean rightBumper = gamepad1.right_bumper;
                 boolean zeroTurret = gamepad1.dpad_down;
                 boolean toggleTracking = gamepad1.dpad_up;
-                boolean leftTrigger = gamepad1.left_trigger > ROLLER_TRIGGER_THRESHOLD;
-                boolean rightTrigger = gamepad1.right_trigger > ROLLER_TRIGGER_THRESHOLD;
+                boolean leftTrigger = gamepad1.left_trigger > TURRET_TRIGGER_THRESHOLD;
+                boolean rightTrigger = gamepad1.right_trigger > TURRET_TRIGGER_THRESHOLD;
 
                 int turretEncoderTicks = sampleSensors();
                 if (!startingPose.initialized) {
@@ -272,10 +273,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                     indicator.setPosition(indicatorPosition);
                 }
 
-                double rollerPower = 0.0;
-                if (leftTrigger != rightTrigger) {
-                    rollerPower = leftTrigger ? INTAKE_ROLLER_POWER : -INTAKE_ROLLER_POWER;
-                }
+                double rollerPower = rollers.update(leftBumper, rightBumper);
                 rollLeft.setPower(rollerPower);
                 rollRight.setPower(rollerPower);
                 intakeLeft.setPosition(intake.intakeUp ? INTAKE_LEFT_UP_POSITION : INTAKE_LEFT_DOWN_POSITION);
@@ -284,7 +282,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 double idealTheta = calculateAndReportTurretTarget(pose);
                 double turretPower = turret.update(turretEncoderTicks, clock.seconds(),
                         startingPose.initialized && odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
-                        idealTheta, zeroTurret, toggleTracking, leftBumper, rightBumper,
+                        idealTheta, zeroTurret, toggleTracking, leftTrigger, rightTrigger,
                         turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES, turretSettings());
                 // Both CR servos drive one turret and share the same controller output.
                 leftTurretServo.setPower(turretPower);
@@ -305,14 +303,16 @@ public class JackbotsTeleOp extends LinearOpMode {
                 telemetry.addData("Ball confirmed (0.25 seconds)", intake.colorConfirmed);
                 telemetry.addData("Ball RGB (0-255, peak-scaled)", "R %d | G %d | B %d", red, green, blue);
                 telemetry.addData("Intake", intake.intakeUp ? "UP" : "DOWN");
+                telemetry.addData("Intake rollers toggled on", rollers.intakeEnabled);
+                telemetry.addLine("LB: toggle intake rollers | Hold RB: outtake");
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
                 telemetry.addData("Heading (Degrees)", "%.1f", pose.getHeading(AngleUnit.DEGREES));
                 addTurretTelemetry(turret);
                 telemetry.addData("Odometry status", odo.getDeviceStatus());
                 telemetry.addLine("D-pad Down: set straight zero | D-pad Up: toggle auto aim / retry");
-                telemetry.addLine("LB/RB: manual (cancels auto) | Both: stop/clear fault");
-                telemetry.addData("Turret LB / RB", "%b / %b", leftBumper, rightBumper);
+                telemetry.addLine("LT/RT: manual (cancels auto) | Both: stop/clear fault");
+                telemetry.addData("Turret LT / RT", "%b / %b", leftTrigger, rightTrigger);
                 telemetry.addData("Turret commanded power (both servos)", "%.2f", turretPower);
                 telemetry.addData("flyFront power", "%.2f", frontFlywheelPower);
                 telemetry.addData("flyBack Target rpm", "%.0f", FLY_BACK_TARGET_RPM);
@@ -491,7 +491,7 @@ public class JackbotsTeleOp extends LinearOpMode {
         }
 
         double update(int rawTicks, double now, boolean odometryReady, double idealTheta,
-                      boolean zero, boolean toggle, boolean lb, boolean rb,
+                      boolean zero, boolean toggle, boolean manualLeft, boolean manualRight,
                       boolean magnetDetected, double magnetAngleDegrees,
                       TurretAimController.Settings settings) {
             // Apply the magnet reference only during homing, including explicit retries.
@@ -520,9 +520,9 @@ public class JackbotsTeleOp extends LinearOpMode {
                     homingSettledSince = Double.NaN;
                 }
             }
-            // Preserve JackbotsTeleOp's manual directions: LB negative, RB positive.
+            // Preserve manual directions: LT negative, RT positive.
             // Any manual input leaves auto off until D-pad Up explicitly resumes it.
-            if (lb || rb) {
+            if (manualLeft || manualRight) {
                 trackingRequested = false;
                 if (homing != Homing.COMPLETE) finishHomingForDriver(now, settings);
             }
@@ -539,7 +539,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             // Once tracking starts, loss of READY is sent as an invalid target so
             // the existing controller latches the fault until an explicit retry.
             double power = controller.update(angleDegrees(), signedTicks, now,
-                    rb && !zero, lb && !zero, false, false, false, settings,
+                    manualRight && !zero, manualLeft && !zero, false, false, false, settings,
                     trackingActive, odometryReady ? idealTheta : Double.NaN);
             if (zero) {
                 controller.cancel(angleDegrees(), signedTicks, now);
@@ -635,7 +635,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             if (homing == Homing.SEEKING_MAGNET) return "Homing: seeking magnet at +0.1";
             if (homing == Homing.RETURNING_TO_ZERO) return "Homing: returning to zero";
             if (homing == Homing.FAILED) return "Homing FAULT: " + homingFault
-                    + " (LB/RB: manual | D-pad Up: retry | D-pad Down: set straight zero)";
+                    + " (LT/RT: manual | D-pad Up: retry | D-pad Down: set straight zero)";
             if (trackingRequested && !zeroEstablished) return "Waiting for turret calibration";
             if (trackingRequested && !trackingActive && !previousZero) return "Waiting for odometry READY";
             return controller.getState();
@@ -644,6 +644,23 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     private static int scaleColorChannel(float channel, float peak) {
         return peak <= 0 ? 0 : Math.max(0, Math.min(255, Math.round(channel / peak * 255)));
+    }
+
+    /** LB toggles intake; held RB temporarily overrides it with outtake. */
+    static final class RollerControl {
+        private boolean previousToggle;
+        boolean intakeEnabled;
+
+        RollerControl(boolean toggleHeldAtStart) {
+            previousToggle = toggleHeldAtStart;
+        }
+
+        double update(boolean toggle, boolean outtake) {
+            if (toggle && !previousToggle) intakeEnabled = !intakeEnabled;
+            previousToggle = toggle;
+            if (outtake) return -INTAKE_ROLLER_POWER;
+            return intakeEnabled ? INTAKE_ROLLER_POWER : 0.0;
+        }
     }
 
     /** Intake and indicator state; Y release takes priority over a previous detection. */
