@@ -13,15 +13,19 @@ public final class JackbotsTurretTrackingTest {
 
     private static final class Rig {
         // A nonzero Hub count proves calibration does not assume a reset motor channel.
-        final JackbotsTeleOp.TurretTracking turret = new JackbotsTeleOp.TurretTracking(12345, false, false);
+        final JackbotsTeleOp.TurretTracking turret = new JackbotsTeleOp.TurretTracking(12345, false);
         TurretAimController.Settings settings =
                 new TurretAimController.Settings(0.002, 0.0, 0.0, 0.20, 0.20, 1.0, 0.2, 1.0, 360.0);
         double now;
 
         void calibrate() {
-            turret.initSample(12345, true, false, 0.0);
-            turret.initSample(12345, false, false, 0.0);
+            turret.initSample(12345, true);
+            turret.initSample(12345, false);
             turret.onStart(false, false);
+            // Complete startup homing with the sensor already at zero.
+            turret.update(12345, now, true, 0, false, false, false, false, true, 0, settings);
+            now += 0.2;
+            turret.update(12345, now, true, 0, false, false, false, false, true, 0, settings);
         }
 
         double step(double angle, double target, boolean ready, boolean zero,

@@ -48,8 +48,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     public static volatile double TURRET_MAX_SPEED = 1.0;
     // Automatic aiming stops within +/- this many degrees of IdealTheta.
     public static volatile double TURRET_TOLERANCE_DEGREES = 3.0;
-    // Live in Panels. Angle assigned on the next negative-side magnet entry.
-    public static volatile double TURRET_MAGNET_ANGLE_DEGREES = 0.0;
+    // Live in Panels. Angle assigned when startup homing first detects the magnet.
+    public static volatile double TURRET_MAGNET_ANGLE_DEGREES = 10.2494;
 
     private static TurretAimController.Settings turretSettings() {
         // PIDF covers the entire +/-180 degree travel range (up to 360 degrees of error).
@@ -165,8 +165,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             configurePinpoint();
             configureTurretEncoder();
             ElapsedTime clock = new ElapsedTime();
-            TurretTracking turret = new TurretTracking(sampleSensors(), gamepad1.dpad_down,
-                    turretMagnetDetected);
+            TurretTracking turret = new TurretTracking(sampleSensors(), gamepad1.dpad_down);
 
             telemetry.setMsTransmissionInterval(100);
             telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
@@ -181,12 +180,11 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
             while (opModeInInit()) {
-                turret.initSample(sampleSensors(), gamepad1.dpad_down,
-                        turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES);
+                turret.initSample(sampleSensors(), gamepad1.dpad_down);
                 Pose2D pose = odo.getPosition();
                 telemetry.addLine("INIT: keep robot still until odometry calibration finishes.");
-                telemetry.addLine("Align turret straight-ahead mark, then press D-pad Down to set zero.");
-                telemetry.addLine("Auto aim starts after START once zero is set and odometry is READY.");
+                telemetry.addLine("START: turret seeks magnet at +0.1, then returns to zero.");
+                telemetry.addLine("Auto aim starts after homing; both bumpers abort homing.");
                 telemetry.addData("Odometry status", odo.getDeviceStatus());
                 telemetry.addData("Starting field pose applied", startingPose.initialized);
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
@@ -229,8 +227,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 if (!startingPose.initialized) {
                     // START can arrive before calibration finishes. Keep outputs at
                     // their initialized zero power until the field pose is read back.
-                    turret.initSample(turretEncoderTicks, zeroTurret,
-                            turretMagnetDetected, TURRET_MAGNET_ANGLE_DEGREES);
+                    turret.initSample(turretEncoderTicks, zeroTurret);
                     turret.onStart(zeroTurret, toggleTracking);
                     previousA = a;
                     previousX = x;
@@ -438,7 +435,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     private void addTurretTelemetry(TurretTracking turret) {
         telemetry.addData("Turret auto requested", turret.trackingRequested);
         telemetry.addData("Turret zero", turret.zeroEstablished
-                ? "Calibrated" : "Use magnet entry or straight-ahead mark + D-pad Down");
+                ? "Calibrated" : "Waiting for startup homing");
         telemetry.addData("Turret state", turret.state());
         telemetry.addData("Turret angle (Degrees)", "%.2f", turret.angleDegrees());
         telemetry.addData("Turret encoder ticks (from reference)", turret.signedTicks);
@@ -452,21 +449,35 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     /** Hardware-independent input handling around the existing turret controller. */
     static final class TurretTracking {
+        private enum Homing { WAITING_FOR_START, SEEKING_MAGNET, RETURNING_TO_ZERO, COMPLETE, FAILED }
+        private static final double HOMING_POWER = 0.1;
+        private static final double HOMING_TIMEOUT_SECONDS = 15.0;
+        private static final double HOMING_TOLERANCE_DEGREES = 1.0;
+        private static final double HOMING_SETTLE_SECONDS = 0.15;
+        private static final TurretAimController.Settings HOMING_SETTINGS =
+                new TurretAimController.Settings(0.005, 0.0, 0.0, HOMING_POWER,
+                        HOMING_POWER, HOMING_POWER, HOMING_POWER, HOMING_POWER,
+                        360.0, HOMING_TOLERANCE_DEGREES);
         final TurretAimController controller = new TurretAimController(false, false, false);
         private final TurretMagnetZero encoder = new TurretMagnetZero();
+        private Homing homing = Homing.WAITING_FOR_START;
+        private double homingStarted = Double.NaN;
+        private double homingSettledSince = Double.NaN;
+        private long homingStartTicks;
+        private String homingFault;
         private long signedTicks;
         private boolean zeroEstablished;
         private boolean trackingRequested = true;
         private boolean trackingActive;
         private boolean previousZero, previousToggle;
 
-        TurretTracking(int rawTicks, boolean zeroHeld, boolean magnetDetected) {
-            encoder.update(rawTicks, magnetDetected);
+        TurretTracking(int rawTicks, boolean zeroHeld) {
+            encoder.update(rawTicks, false);
             previousZero = zeroHeld;
         }
 
-        void initSample(int rawTicks, boolean zero, boolean magnetDetected, double magnetAngleDegrees) {
-            if (encoder.update(rawTicks, magnetDetected, magnetAngleDegrees)) zeroEstablished = true;
+        void initSample(int rawTicks, boolean zero) {
+            encoder.update(rawTicks, false);
             if (zero && !previousZero) calibrate();
             signedTicks = encoder.zeroedTicks();
             previousZero = zero;
@@ -475,23 +486,28 @@ public class JackbotsTeleOp extends LinearOpMode {
         void onStart(boolean zeroHeld, boolean toggleHeld) {
             previousZero = zeroHeld;
             previousToggle = toggleHeld;
+            if (homing == Homing.WAITING_FOR_START) homing = Homing.SEEKING_MAGNET;
         }
 
         double update(int rawTicks, double now, boolean odometryReady, double idealTheta,
                       boolean zero, boolean toggle, boolean lb, boolean rb,
                       boolean magnetDetected, double magnetAngleDegrees,
                       TurretAimController.Settings settings) {
-            boolean magnetCorrected = encoder.update(rawTicks, magnetDetected, magnetAngleDegrees);
-            if (magnetCorrected) zeroEstablished = true;
+            // TeleOp applies the magnet reference only in the startup sequence below.
+            // All later samples track encoder motion without any magnet correction.
+            encoder.update(rawTicks, false);
+            signedTicks = encoder.zeroedTicks();
+            if (homing != Homing.COMPLETE) {
+                previousZero = zero;
+                previousToggle = toggle;
+                if (homing == Homing.WAITING_FOR_START || homing == Homing.FAILED) return 0.0;
+                if (lb && rb) return failHoming("Cancelled by both bumpers", now);
+                return updateHoming(magnetDetected, magnetAngleDegrees, now);
+            }
             boolean zeroPressed = zero && !previousZero;
             if (zeroPressed) calibrate();
             signedTicks = encoder.zeroedTicks();
             if (zeroPressed) controller.cancel(angleDegrees(), signedTicks, now);
-            else if (magnetCorrected) {
-                // Clear motion history after changing the reference, preserving auto aim
-                // and fault state. The controller computes power again this same loop.
-                controller.rebase(angleDegrees(), signedTicks, now);
-            }
             if (toggle && !previousToggle) trackingRequested = !trackingRequested;
             previousZero = zero;
             previousToggle = toggle;
@@ -515,6 +531,68 @@ public class JackbotsTeleOp extends LinearOpMode {
             return power;
         }
 
+        private double updateHoming(boolean magnetDetected, double magnetAngleDegrees, double now) {
+            if (Double.isNaN(homingStarted)) {
+                homingStarted = now;
+                homingStartTicks = signedTicks;
+            }
+            if (now - homingStarted >= HOMING_TIMEOUT_SECONDS) {
+                return failHoming("Timed out", now);
+            }
+            if (homing == Homing.SEEKING_MAGNET) {
+                if (!Double.isFinite(magnetAngleDegrees)
+                        || Math.abs(magnetAngleDegrees) > TurretAimController.LIMIT_DEGREES) {
+                    return failHoming("Invalid magnet angle", now);
+                }
+                if (magnetDetected) {
+                    // If already on the sensor at START, accept it without driving farther.
+                    encoder.setAngleDegrees(magnetAngleDegrees);
+                    signedTicks = encoder.zeroedTicks();
+                    zeroEstablished = true;
+                    controller.cancel(angleDegrees(), signedTicks, now);
+                    homing = Homing.RETURNING_TO_ZERO;
+                    homingStarted = now;
+                } else {
+                    if (signedTicks - homingStartTicks >= 360.0 * TurretMagnetZero.TICKS_PER_DEGREE) {
+                        return failHoming("Magnet not found within one turret revolution", now);
+                    }
+                    // Angle is not calibrated yet. Monitor real encoder progress for
+                    // stall/direction faults without treating the INIT position as true zero.
+                    double power = controller.update(0.0, signedTicks, now,
+                            true, false, false, false, false, HOMING_SETTINGS);
+                    if (controller.getState().startsWith("FAULT:")) {
+                        return failHoming(controller.getState(), now);
+                    }
+                    return power;
+                }
+            }
+            // The magnet is ignored throughout the return and for the rest of this OpMode.
+            double power = controller.update(angleDegrees(), signedTicks, now,
+                    false, false, false, false, false, HOMING_SETTINGS, true, 0.0);
+            if (controller.getState().startsWith("FAULT:")) {
+                return failHoming(controller.getState(), now);
+            }
+            if (Math.abs(angleDegrees()) <= HOMING_TOLERANCE_DEGREES) {
+                if (Double.isNaN(homingSettledSince)) homingSettledSince = now;
+                if (now - homingSettledSince >= HOMING_SETTLE_SECONDS) {
+                    homing = Homing.COMPLETE;
+                    controller.cancel(angleDegrees(), signedTicks, now);
+                    return 0.0;
+                }
+            } else {
+                homingSettledSince = Double.NaN;
+            }
+            return power;
+        }
+
+        private double failHoming(String reason, double now) {
+            homing = Homing.FAILED;
+            homingFault = reason;
+            trackingRequested = false;
+            controller.cancel(angleDegrees(), signedTicks, now);
+            return 0.0;
+        }
+
         private void calibrate() {
             encoder.setAngleDegrees(0.0);
             zeroEstablished = true;
@@ -525,6 +603,10 @@ public class JackbotsTeleOp extends LinearOpMode {
         }
 
         String state() {
+            if (homing == Homing.WAITING_FOR_START) return "Waiting for START to home turret";
+            if (homing == Homing.SEEKING_MAGNET) return "Homing: seeking magnet at +0.1";
+            if (homing == Homing.RETURNING_TO_ZERO) return "Homing: returning to zero";
+            if (homing == Homing.FAILED) return "Homing FAULT: " + homingFault + " (restart OpMode to retry)";
             if (trackingRequested && !zeroEstablished) return "Waiting for turret calibration";
             if (trackingRequested && !trackingActive && !previousZero) return "Waiting for odometry READY";
             return controller.getState();

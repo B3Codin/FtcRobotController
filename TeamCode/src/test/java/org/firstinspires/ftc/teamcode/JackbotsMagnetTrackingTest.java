@@ -1,6 +1,6 @@
 package org.firstinspires.ftc.teamcode;
 
-/** Checks the magnet correction in TeleOp's actual auto/manual control path. */
+/** Startup homing and subsequent encoder-only tracking in the actual TeleOp controller. */
 public final class JackbotsMagnetTrackingTest {
     private static int checks;
 
@@ -10,99 +10,138 @@ public final class JackbotsMagnetTrackingTest {
     }
 
     private static final class Rig {
-        // A nonzero Hub count proves calibration does not assume a reset motor channel.
-        final JackbotsTeleOp.TurretTracking turret = new JackbotsTeleOp.TurretTracking(12345, false, false);
-        TurretAimController.Settings settings =
+        final JackbotsTeleOp.TurretTracking turret = new JackbotsTeleOp.TurretTracking(12345, false);
+        final TurretAimController.Settings settings =
                 new TurretAimController.Settings(0.002, 0.0, 0.0, 0.20, 0.20, 1.0, 0.2, 1.0, 360.0);
         double now;
-        boolean magnetDetected;
-        double magnetAngleDegrees;
+        double magnetAngle = 10.2494;
+        boolean detected;
 
-        void calibrate() {
-            turret.initSample(12345, true, magnetDetected, magnetAngleDegrees);
-            turret.initSample(12345, false, magnetDetected, magnetAngleDegrees);
+        void start() {
             turret.onStart(false, false);
         }
 
-        double step(double angle, double target, boolean ready, boolean zero,
-                    boolean toggle, boolean lb, boolean rb) {
+        double step(double encoderDegrees, double target, boolean lb, boolean rb) {
             now += 0.05;
-            int rawTicks = 12345 + (int) Math.round(angle * 8192.0 * 3.75 / 360.0);
-            return turret.update(rawTicks, now, ready, target, zero, toggle, lb, rb,
-                    magnetDetected, magnetAngleDegrees, settings);
+            int ticks = 12345 + (int) Math.round(encoderDegrees * TurretMagnetZero.TICKS_PER_DEGREE);
+            return turret.update(ticks, now, true, target, false, false, lb, rb,
+                    detected, magnetAngle, settings);
         }
 
-        double track(double angle, double target) {
-            return step(angle, target, true, false, false, false, false);
+        double step(double encoderDegrees) {
+            return step(encoderDegrees, 45, false, false);
+        }
+
+        void homeAtStart() {
+            detected = true;
+            magnetAngle = 0;
+            start();
+            step(0);
+            now += 0.2;
+            step(0);
         }
     }
 
     public static void main(String[] args) {
-        Rig r;
-        r = new Rig();
-        r.calibrate();
-        r.track(-10, 45);
-        r.magnetAngleDegrees = -2.75;
-        r.magnetDetected = true;
-        expect(r.track(-5, 45) > 0, "Magnet correction preserves auto aim in the same loop");
-        expect(r.turret.angleDegrees() == -2.75, "Magnet assigns the configured angle exactly");
-        expect(r.turret.controller.getVelocity() == 0, "Correction does not cause a derivative spike");
-        expect(r.turret.controller.getTargetDegrees() == 45, "Magnet does not replace the aiming target");
-        expect(r.track(-4, 45) > 0 && r.turret.angleDegrees() > -2.75,
-                "Tracking continues while the magnet stays on");
-        double correctedAngle = r.turret.angleDegrees();
-        r.magnetAngleDegrees = 12.5;
-        r.track(-4, 45);
-        expect(r.turret.angleDegrees() == correctedAngle, "Live setting edits wait for the next entry");
-        r.magnetDetected = false;
-        r.track(10, 45);
-        r.magnetDetected = true;
-        r.track(5, -45);
-        expect(Math.abs(r.turret.angleDegrees() - 7.25) < 0.02,
-                "Positive-side entry does not apply the new angle");
-        r.magnetDetected = false;
-        r.track(-10, -45);
-        r.magnetDetected = true;
-        expect(r.track(-5, 45) > 0 && r.turret.angleDegrees() == 12.5,
-                "Next negative-side entry uses the new configured angle");
-        expect(r.step(-5, 45, true, true, false, false, false) == 0
-                        && r.turret.angleDegrees() == 0,
-                "D-pad Down still sets physical straight zero with a nonzero magnet setting");
+        Rig r = new Rig();
+        r.detected = true;
+        r.turret.initSample(12345, false);
+        expect(r.step(0) == 0, "No motion during INIT even when sensor is active");
+        expect(r.turret.angleDegrees() == 0, "INIT does not apply magnet angle");
+        r.detected = false;
+        r.start();
+        expect(r.step(0) == 0.1, "START seeks in the positive direction at exactly 0.1");
+        expect(r.step(1, -45, true, false) == 0.1,
+                "Homing precedes normal aiming and single-bumper commands");
+        r.detected = true;
+        expect(r.step(2) == -0.1, "Sensor detection reverses toward zero at 0.1");
+        expect(r.turret.angleDegrees() == 10.2494, "Preserve the configured sensor angle");
+        expect(r.turret.controller.getTargetDegrees() == 0, "Return targets zero rather than the field goal");
+        r.magnetAngle = 80;
+        expect(r.step(-3) == -0.1, "Return continues while sensor stays active");
+        expect(Math.abs(r.turret.angleDegrees() - 5.2494) < 0.02,
+                "Sensor and setting changes cannot rebase the return");
+        double rawZeroDegrees = 2 - 10.2494;
+        expect(r.step(rawZeroDegrees) == 0, "Arrival within one degree stops turret power");
+        r.now += 0.2;
+        expect(r.step(rawZeroDegrees) == 0, "Zero must settle before homing completes");
+        expect(r.step(rawZeroDegrees) > 0, "Normal field aiming resumes after homing");
+        r.detected = false;
+        r.step(rawZeroDegrees + 1);
+        r.detected = true;
+        r.step(rawZeroDegrees + 2);
+        expect(Math.abs(r.turret.angleDegrees() - 2) < 0.02,
+                "Later negative-side sensor entries cannot change the reference");
+        r.turret.onStart(false, false);
+        expect(r.step(rawZeroDegrees + 3) > 0 && !r.turret.state().startsWith("Homing:"),
+                "Repeated start notifications cannot restart homing");
+        expect(r.step(rawZeroDegrees + 4, 45, true, false) == -0.2,
+                "Normal manual controls resume after homing");
+        expect(r.step(rawZeroDegrees + 3) == 0, "Manual override still cancels auto aim");
 
         r = new Rig();
-        expect(r.track(-10, 45) == 0, "Uncalibrated turret waits before first magnet entry");
-        r.magnetDetected = true;
-        expect(r.track(-5, 45) > 0 && r.turret.angleDegrees() == 0,
-                "First valid magnet entry establishes zero and permits auto aim");
+        r.detected = true;
+        r.start();
+        expect(r.step(0) == -0.1, "Starting on the sensor returns immediately without seeking farther");
 
         r = new Rig();
-        r.calibrate();
-        r.step(-10, 45, true, false, false, false, true);
-        r.magnetDetected = true;
-        expect(r.step(-5, 45, true, false, false, false, true) == 0.2,
-                "Magnet correction keeps a held manual bumper moving");
-        expect(r.track(-4, 45) == 0, "Magnet correction cannot re-enable manually cancelled auto aim");
+        r.homeAtStart();
+        expect(r.turret.angleDegrees() == 0, "A zero-degree sensor setting needs no return movement");
+        expect(r.step(0) > 0, "Zero-degree homing hands control back to aiming");
 
         r = new Rig();
-        r.calibrate();
-        r.track(-10, 45);
+        r.detected = true;
+        r.magnetAngle = -10;
+        r.start();
+        expect(r.step(0) == 0.1, "A negative sensor angle returns in the positive direction");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
         r.now += 1.1;
-        expect(r.track(-10, 45) == 0 && r.turret.state().contains("FAULT"), "Create a stall fault");
-        r.magnetDetected = true;
-        expect(r.track(-5, 45) == 0 && r.turret.state().contains("FAULT"),
-                "Magnet correction preserves a latched fault");
+        expect(r.step(0) == 0 && r.turret.state().contains("No turret movement"),
+                "A stalled seek stops and latches a fault");
+        r.detected = true;
+        expect(r.step(1) == 0, "A later sensor detection cannot restart failed homing");
 
-        JackbotsTeleOp.TurretTracking initTurret = new JackbotsTeleOp.TurretTracking(100, false, true);
-        initTurret.initSample(110, false, true, 8.5);
-        expect(Math.abs(initTurret.angleDegrees() - 10 / TurretMagnetZero.TICKS_PER_DEGREE) < 1e-9,
-                "Starting on the magnet does not apply a correction");
-        initTurret.initSample(90, false, false, 8.5);
-        initTurret.initSample(100, false, true, 8.5);
-        expect(initTurret.angleDegrees() == 8.5, "INIT samples can establish the magnet reference");
-        initTurret.onStart(false, false);
-        expect(initTurret.update(110, 0.05, true, 45, false, false, false, false,
-                        true, 8.5, r.settings) > 0,
-                "A calibration made during INIT permits aiming after START");
-        System.out.println("Passed " + checks + " Jackbots magnet tracking checks.");
+        r = new Rig();
+        r.start();
+        r.step(0);
+        r.now += 0.2;
+        expect(r.step(-1) == 0 && r.turret.state().contains("direction"),
+                "Wrong encoder direction stops the seek");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        r.now += 15;
+        expect(r.step(1) == 0 && r.turret.state().contains("Timed out"), "Missing sensor times out");
+
+        r = new Rig();
+        r.start();
+        r.step(0);
+        expect(r.step(360) == 0 && r.turret.state().contains("one turret revolution"),
+                "A missed sensor cannot cause repeated revolutions");
+
+        r = new Rig();
+        r.start();
+        expect(r.step(0, 45, true, true) == 0 && r.turret.state().contains("Cancelled"),
+                "Both bumpers abort homing");
+        expect(r.step(1) == 0, "Releasing bumpers cannot restart cancelled homing");
+
+        r = new Rig();
+        r.start();
+        r.magnetAngle = Double.NaN;
+        expect(r.step(0) == 0 && r.turret.state().contains("Invalid magnet angle"),
+                "Invalid reference cannot start motion");
+
+        r = new Rig();
+        r.detected = true;
+        r.start();
+        r.step(0);
+        r.now += 1.1;
+        expect(r.step(0) == 0 && r.turret.state().contains("No turret movement"),
+                "A stalled return also stops and latches a fault");
+        System.out.println("Passed " + checks + " Jackbots homing checks.");
     }
 }
