@@ -97,10 +97,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final float COLOR_GAIN = 2.0f;
     private static final float MIN_COLOR_SIGNAL = 0.005f;
     private static final float MIN_COLOR_SATURATION = 0.20f;
-    // RGBTest's 500–2500 us PWM range: violet/purple at 1900 us, red at 1100 us.
+    // RGBTest's 500–2500 us PWM range: violet/purple at 1900 us, green at 1500 us.
     private static final double RGB_OFF = 0.0;
     private static final double RGB_PURPLE = 0.7;
-    private static final double RGB_RED = 0.3;
+    private static final double RGB_GREEN = 0.5;
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor rollLeft, rollRight;
@@ -179,8 +179,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
-            telemetry.addLine("Intake starts DOWN. 0.5 seconds of continuous color raises intake.");
-            telemetry.addLine("Release Y: lower intake | RGBs: purple, red after 0.5 seconds of color.");
+            telemetry.addLine("Intake starts DOWN. 0.25 seconds of continuous color raises intake.");
+            telemetry.addLine("Release Y: lower intake | RGBs: purple, green after 0.25 seconds of color.");
             telemetry.addLine("LT/RT run rollers with the intake UP or DOWN.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
@@ -267,7 +267,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 int blue = scaleColorChannel(colors.blue, peak);
                 boolean colorDetected = detectsColor(colors);
                 intake.update(colorDetected, clock.seconds(), y, b);
-                double indicatorPosition = intake.colorConfirmed ? RGB_RED : RGB_PURPLE;
+                double indicatorPosition = intake.colorConfirmed ? RGB_GREEN : RGB_PURPLE;
                 for (ServoImplEx indicator : indicators) {
                     indicator.setPosition(indicatorPosition);
                 }
@@ -302,7 +302,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 }
 
                 telemetry.addData("Color detected", colorDetected);
-                telemetry.addData("Ball confirmed (0.5 seconds)", intake.colorConfirmed);
+                telemetry.addData("Ball confirmed (0.25 seconds)", intake.colorConfirmed);
                 telemetry.addData("Ball RGB (0-255, peak-scaled)", "R %d | G %d | B %d", red, green, blue);
                 telemetry.addData("Intake", intake.intakeUp ? "UP" : "DOWN");
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
@@ -672,7 +672,7 @@ public class JackbotsTeleOp extends LinearOpMode {
 
     /** Require uninterrupted detection; every clear reading starts the wait over. */
     static final class ColorConfirmation {
-        private static final double REQUIRED_SECONDS = 0.5;
+        private static final double REQUIRED_SECONDS = 0.25;
         private double detectedSince = Double.NaN;
 
         boolean update(boolean detected, double nowSeconds) {
