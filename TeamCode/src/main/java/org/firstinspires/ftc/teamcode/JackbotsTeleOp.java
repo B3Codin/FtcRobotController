@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
+import android.graphics.Color;
+
 import com.bylazar.configurables.annotations.Configurable;
 import com.pedropathing.revhub.localizers.PinpointConfig;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
@@ -97,9 +99,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     private static final float COLOR_GAIN = 2.0f;
     private static final float MIN_COLOR_SIGNAL = 0.005f;
     private static final float MIN_COLOR_SATURATION = 0.20f;
-    // RGBTest uses 500–2500 us PWM, with off at 500 us and green at 1500 us.
+    // Same 500–2500 us PWM range and hue landmarks as RGBTest.
     private static final double RGB_OFF = 0.0;
-    private static final double RGB_GREEN = 0.5;
+    private static final double[] RGB_HUES = {0, 30.118, 60, 90, 120, 210, 240, 274.615, 282.085};
+    private static final double[] RGB_PULSES = {1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900};
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor rollLeft, rollRight;
@@ -178,8 +181,8 @@ public class JackbotsTeleOp extends LinearOpMode {
             telemetry.addData("Left turret connection", leftTurretServo.getConnectionInfo());
             telemetry.addData("Right turret connection", rightTurretServo.getConnectionInfo());
             telemetry.addLine("X: toggle flywheels on/off | B: toggle intake up/down | Hold Y: open blocker");
-            telemetry.addLine("Intake starts DOWN. One full second of color raises intake and stops rollers.");
-            telemetry.addLine("RGBs are green while color is detected, off when clear.");
+            telemetry.addLine("Intake starts DOWN. B toggles intake up/down.");
+            telemetry.addLine("RGBs match the sensed ball color, off when clear.");
             telemetry.addLine("Rollers work only with the intake DOWN.");
             telemetry.addLine("Keep robot still during INIT for odometry calibration.");
             telemetry.update();
@@ -210,7 +213,7 @@ public class JackbotsTeleOp extends LinearOpMode {
             boolean previousA = gamepad1.a, previousX = false, previousB = false;
             boolean flywheelsEnabled = false;
             boolean intakeUp = false;
-            ColorConfirmation colorConfirmation = new ColorConfirmation();
+            float[] ballHsv = new float[3];
             double frontTicksPerSecondPerRPM = flyFront.getMotorType().getTicksPerRev()
                     / (60.0 * FLYWHEEL_RATIO);
             double backTicksPerSecondPerRPM = flyBack.getMotorType().getTicksPerRev()
@@ -265,16 +268,20 @@ public class JackbotsTeleOp extends LinearOpMode {
                         + fieldRight * Math.cos(heading);
                 drive(robotForward, robotRight, gamepad1.right_stick_x);
 
-                boolean colorDetected = detectsColor(colorSensor.getNormalizedColors());
-                boolean colorConfirmed = colorConfirmation.update(colorDetected, clock.seconds());
-                // Indicators follow the current reading, not the delayed/latching intake state.
+                NormalizedRGBA colors = colorSensor.getNormalizedColors();
+                float peak = Math.max(colors.red, Math.max(colors.green, colors.blue));
+                int red = scaleColorChannel(colors.red, peak);
+                int green = scaleColorChannel(colors.green, peak);
+                int blue = scaleColorChannel(colors.blue, peak);
+                // Scale before HSV conversion to preserve hue in dim sensor readings.
+                Color.RGBToHSV(red, green, blue, ballHsv);
+                boolean colorDetected = detectsColor(colors);
+                double indicatorPosition = colorDetected ? rgbPositionForHue(ballHsv[0]) : RGB_OFF;
                 for (ServoImplEx indicator : indicators) {
-                    indicator.setPosition(colorDetected ? RGB_GREEN : RGB_OFF);
+                    indicator.setPosition(indicatorPosition);
                 }
 
-                if (colorConfirmed) {
-                    intakeUp = true;
-                } else if (b && !previousB) {
+                if (b && !previousB) {
                     intakeUp = !intakeUp;
                 }
 
@@ -308,7 +315,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                 }
 
                 telemetry.addData("Color detected", colorDetected);
-                telemetry.addData("Color confirmed (1 second)", colorConfirmed);
+                telemetry.addData("Ball RGB (0-255, peak-scaled)", "R %d | G %d | B %d", red, green, blue);
                 telemetry.addData("Intake", intakeUp ? "UP" : "DOWN");
                 telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
                 telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
@@ -620,19 +627,27 @@ public class JackbotsTeleOp extends LinearOpMode {
         }
     }
 
-    /** Require uninterrupted detection; every clear reading starts the wait over. */
-    static final class ColorConfirmation {
-        private static final double REQUIRED_SECONDS = 0.5;
-        private double detectedSince = Double.NaN;
+    private static int scaleColorChannel(float channel, float peak) {
+        return peak <= 0 ? 0 : Math.max(0, Math.min(255, Math.round(channel / peak * 255)));
+    }
 
-        boolean update(boolean detected, double nowSeconds) {
-            if (!detected) {
-                detectedSince = Double.NaN;
-                return false;
+    private static double rgbPositionForHue(double hue) {
+        // The indicators approximate hue; they cannot reproduce arbitrary RGB brightness.
+        int last = RGB_HUES.length - 1;
+        double pulse = RGB_PULSES[last];
+        if (hue > RGB_HUES[last]) {
+            // Unsupported hues between violet and red use the nearer endpoint.
+            pulse = 360 - hue < hue - RGB_HUES[last] ? RGB_PULSES[0] : RGB_PULSES[last];
+        } else {
+            for (int i = 1; i < RGB_HUES.length; i++) {
+                if (hue <= RGB_HUES[i]) {
+                    double fraction = (hue - RGB_HUES[i - 1]) / (RGB_HUES[i] - RGB_HUES[i - 1]);
+                    pulse = RGB_PULSES[i - 1] + fraction * (RGB_PULSES[i] - RGB_PULSES[i - 1]);
+                    break;
+                }
             }
-            if (Double.isNaN(detectedSince)) detectedSince = nowSeconds;
-            return nowSeconds - detectedSince >= REQUIRED_SECONDS;
         }
+        return (pulse - 500.0) / 2000.0;
     }
 
     private static boolean detectsColor(NormalizedRGBA colors) {
