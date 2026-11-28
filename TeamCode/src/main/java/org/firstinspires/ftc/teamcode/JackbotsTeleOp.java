@@ -32,7 +32,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     // Negative power preserves the front flywheel's spin direction.
     private static final double FLY_FRONT_POWER = -1.0;
     // Live in Panels under JackbotsTeleOp; negative RPM preserves firing direction.
-    public static volatile double FLY_BACK_TARGET_RPM = -2250.0;
+    public static volatile double FLY_BACK_TARGET_RPM = -2000;
 
     // Same Expansion Hub port and gearing as TurretAimTest. Do not reset the
     // shared motor channel: read its encoder directly and keep a software zero.
@@ -59,8 +59,8 @@ public class JackbotsTeleOp extends LinearOpMode {
     }
 
     // Field origin is the bottom-left corner; the robot starts inset from that corner.
-    private static final double START_X_MM = 198.0;
-    private static final double START_Y_MM = -217.4;
+    static final double START_X_MM = 198.0;
+    static final double START_Y_MM = -217.4;
     private static final double TURRET_OFFSET_X_MM = 48.0;
     private static final double GOAL_ONE_X_MM = 1397.6;
     private static final double GOAL_TWO_X_MM = 2260.0;
@@ -421,6 +421,10 @@ public class JackbotsTeleOp extends LinearOpMode {
     /** Startup-only initialization; never reapplies the pose after driving or an A reset. */
     static final class StartingPose {
         private boolean initialized;
+
+        boolean isInitialized() {
+            return initialized;
+        }
 
         boolean shouldApply(boolean ready, double secondsSinceReset) {
             // SDK documents ~0.25 s calibration. Wait at least 0.5 s AND READY,
