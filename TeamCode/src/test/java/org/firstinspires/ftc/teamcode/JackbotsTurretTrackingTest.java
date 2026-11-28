@@ -22,10 +22,6 @@ public final class JackbotsTurretTrackingTest {
             turret.initSample(12345, true);
             turret.initSample(12345, false);
             turret.onStart(false, false);
-            // Complete startup homing with the sensor already at zero.
-            turret.update(12345, now, true, 0, false, false, false, false, true, 0, settings);
-            now += 0.2;
-            turret.update(12345, now, true, 0, false, false, false, false, true, 0, settings);
         }
 
         double step(double angle, double target, boolean ready, boolean zero,
@@ -33,7 +29,7 @@ public final class JackbotsTurretTrackingTest {
             now += 0.05;
             int rawTicks = 12345 + (int) Math.round(angle * 8192.0 * 3.75 / 360.0);
             return turret.update(rawTicks, now, ready, target, zero, toggle, lb, rb,
-                    false, 0.0, settings);
+                    settings);
         }
 
         double track(double angle, double target) {
