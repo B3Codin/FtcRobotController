@@ -48,7 +48,7 @@ public class JackbotsTeleOp extends LinearOpMode {
     public static volatile double TURRET_MAX_SPEED = 1.0;
     // Automatic aiming stops within +/- this many degrees of IdealTheta.
     public static volatile double TURRET_TOLERANCE_DEGREES = 2.0;
-    // Live in Panels. Angle assigned when startup homing first detects the magnet.
+    // Live in Panels. Reference angle for startup homing and later magnet entries.
     public static volatile double TURRET_MAGNET_ANGLE_DEGREES = 10.2494;
 
     private static TurretAimController.Settings turretSettings() {
@@ -112,7 +112,6 @@ public class JackbotsTeleOp extends LinearOpMode {
     private List<LynxModule> hubs;
     private LynxModule turretEncoderHub;
     private DigitalChannel turretMagnet;
-    private boolean turretMagnetDetected;
     private final ElapsedTime pinpointStartupClock = new ElapsedTime();
     private final StartingPose startingPose = new StartingPose();
     // Preserve field coordinates when A resets the displayed local odometry X/Y.
@@ -281,6 +280,8 @@ public class JackbotsTeleOp extends LinearOpMode {
                 intakeRight.setPosition(intake.intakeUp ? INTAKE_RIGHT_UP_POSITION : INTAKE_RIGHT_DOWN_POSITION);
 
                 double idealTheta = calculateAndReportTurretTarget(pose);
+                // Keep sampling after startup so later magnet entries correct encoder drift.
+                boolean turretMagnetDetected = turret.needsMagnetSample() && !turretMagnet.getState();
                 double turretPower = turret.update(turretEncoderTicks, clock.seconds(),
                         startingPose.initialized && odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY,
                         idealTheta, zeroTurret, toggleTracking, leftTrigger, rightTrigger,
@@ -414,7 +415,6 @@ public class JackbotsTeleOp extends LinearOpMode {
         if (encoderData.isFake()) {
             throw new IllegalStateException("Turret encoder read failed; stopping OpMode.");
         }
-        turretMagnetDetected = !turretMagnet.getState();
         return encoderData.getMotorCurrentPosition(TURRET_ENCODER_PORT);
     }
 
@@ -491,13 +491,26 @@ public class JackbotsTeleOp extends LinearOpMode {
             if (homing == Homing.WAITING_FOR_START) homing = Homing.SEEKING_MAGNET;
         }
 
+        boolean needsMagnetSample() {
+            return homing != Homing.WAITING_FOR_START;
+        }
+
         double update(int rawTicks, double now, boolean odometryReady, double idealTheta,
                       boolean zero, boolean toggle, boolean manualLeft, boolean manualRight,
                       boolean magnetDetected, double magnetAngleDegrees,
                       TurretAimController.Settings settings) {
-            // Apply the magnet reference only during homing, including explicit retries.
-            encoder.update(rawTicks, false);
+            // Track sensor edges throughout homing, but only correct normal operation
+            // on entry from the negative side. A held sensor must not pin the angle.
+            boolean allowMagnetCorrection = homing == Homing.COMPLETE && !zero
+                    && Math.abs(magnetAngleDegrees) <= TurretAimController.LIMIT_DEGREES;
+            boolean corrected = encoder.update(rawTicks, magnetDetected,
+                    allowMagnetCorrection ? magnetAngleDegrees : Double.NaN);
             signedTicks = encoder.zeroedTicks();
+            if (corrected) {
+                zeroEstablished = true;
+                // Reset derivative/progress history without cancelling the target or clearing faults.
+                controller.rebase(angleDegrees(), signedTicks, now);
+            }
             if (homing == Homing.WAITING_FOR_START) return 0.0;
             boolean zeroPressed = zero && !previousZero;
             boolean togglePressed = toggle && !previousToggle;
@@ -595,7 +608,7 @@ public class JackbotsTeleOp extends LinearOpMode {
                     return power;
                 }
             }
-            // The magnet is ignored throughout the return and normal tracking.
+            // Returning to zero keeps the reference captured by the startup detection.
             double power = controller.update(angleDegrees(), signedTicks, now,
                     false, false, false, false, false, HOMING_SETTINGS, true, 0.0);
             if (controller.getState().startsWith("FAULT:")) {

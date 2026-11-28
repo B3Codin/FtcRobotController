@@ -42,8 +42,8 @@ public final class Constants {
         c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.FORWARD);
 
         // Measured values from PinpointTuner (in inches).
-        c.xPodOffset.set(0.777365616926058);
-        c.yPodOffset.set(1.0449010743869571);
+        c.xPodOffset.set(0.013307814053663118);
+        c.yPodOffset.set(1.5262961199903113);
     });
 
     public static ForesightConfig foresightConfig = new ForesightConfig(
