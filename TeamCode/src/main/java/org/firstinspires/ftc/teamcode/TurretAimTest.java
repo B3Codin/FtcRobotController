@@ -72,6 +72,7 @@ public class TurretAimTest extends LinearOpMode {
     private boolean magnetDetected;
     private boolean straightZeroEstablished;
     private boolean tracking;
+    private final FieldHeadingSelection fieldHeading = new FieldHeadingSelection();
     private double fieldTargetDegrees = Double.NaN;
     private double fieldOriginX;
     private double fieldOriginY;
@@ -133,6 +134,7 @@ public class TurretAimTest extends LinearOpMode {
             boolean previousA = gamepad1.a;
             boolean previousTrack = gamepad1.dpad_up;
             previousZero = gamepad1.dpad_down;
+            fieldHeading.onStart(gamepad1.x, gamepad1.y, gamepad1.b);
             TurretAimController controller = new TurretAimController(gamepad1.x, gamepad1.y, gamepad1.b);
             controller.rebase(turretAngleDegrees(), signedEncoderTicks(), clock.seconds());
             while (opModeIsActive()) {
@@ -142,19 +144,33 @@ public class TurretAimTest extends LinearOpMode {
                 // between the button check and the previous-button assignment.
                 boolean zero = gamepad1.dpad_down;
                 boolean track = gamepad1.dpad_up;
+                boolean x = gamepad1.x, y = gamepad1.y, b = gamepad1.b;
+                boolean leftBumper = gamepad1.left_bumper, rightBumper = gamepad1.right_bumper;
                 boolean zeroPressed = zero && !previousZero;
                 boolean trackPressed = track && !previousTrack;
                 if (zeroPressed) {
                     calibrateStraightAhead();
                     controller.cancel(turretAngleDegrees(), signedEncoderTicks(), now);
                 }
-                if (trackPressed) tracking = !tracking;
-                if (gamepad1.left_bumper || gamepad1.right_bumper || gamepad1.x
-                        || gamepad1.y || gamepad1.b || zero) tracking = false;
+                if (trackPressed) {
+                    tracking = !tracking;
+                    fieldHeading.clear();
+                    controller.cancel(turretAngleDegrees(), signedEncoderTicks(), now);
+                }
+                if (fieldHeading.update(x, y, b)) {
+                    tracking = false;
+                    // A fresh preset press changes direction or explicitly retries a fault.
+                    controller.cancel(turretAngleDegrees(), signedEncoderTicks(), now);
+                }
+                if (leftBumper || rightBumper || zero) {
+                    tracking = false;
+                    fieldHeading.clear();
+                }
                 Pose2D pose = odo.getPosition();
                 boolean a = gamepad1.a;
                 if (startingPose.isInitialized() && a && !previousA) {
                     tracking = false;
+                    fieldHeading.clear();
                     controller.cancel(turretAngleDegrees(), signedEncoderTicks(), now);
                     // Translate the stored goal with the origin so it stays at the same field point.
                     fieldOriginX += pose.getX(DistanceUnit.METER);
@@ -176,16 +192,17 @@ public class TurretAimTest extends LinearOpMode {
                     drive(0.0, 0.0, 0.0);
                 }
 
-                fieldTargetDegrees = fieldTarget(pose).idealTheta;
+                fieldTargetDegrees = fieldHeading.isSelected()
+                        ? fieldHeading.robotTargetDegrees(pose.getHeading(AngleUnit.DEGREES))
+                        : fieldTarget(pose).idealTheta;
                 boolean trackingReady = straightZeroEstablished && startingPose.isInitialized()
                         && odo.getDeviceStatus() == GoBildaPinpointDriver.DeviceStatus.READY;
                 TurretAimController.Settings settings = new TurretAimController.Settings(
                         TURRET_P, TURRET_I, TURRET_D, TURRET_F, TURRET_MIN_POWER, TURRET_MAX_POWER,
                         TURRET_MANUAL_POWER, TURRET_MAX_POWER, 360.0, TURRET_TOLERANCE_DEGREES);
                 double power = controller.update(turretAngleDegrees(), signedEncoderTicks(), now,
-                        gamepad1.left_bumper, gamepad1.right_bumper,
-                        gamepad1.x, gamepad1.y, gamepad1.b, settings,
-                        tracking, trackingReady ? fieldTargetDegrees : Double.NaN);
+                        leftBumper, rightBumper, false, false, false, settings,
+                        tracking || fieldHeading.isSelected(), trackingReady ? fieldTargetDegrees : Double.NaN);
                 if (zero) {
                     controller.cancel(turretAngleDegrees(), signedEncoderTicks(), now);
                     power = 0.0;
@@ -195,11 +212,10 @@ public class TurretAimTest extends LinearOpMode {
                 if (now - lastTrackingLogTime >= 0.5) {
                     RobotLog.ii("TurretAimTracking",
                             "enabled=%b state=%s x=%.3f y=%.3f heading=%.2f target=%.2f angle=%.2f power=%.3f odo=%s buttons=up:%b down:%b a:%b x:%b y:%b b:%b lb:%b rb:%b P=%.4f I=%.4f D=%.4f F=%.3f min=%.3f max=%.3f tolerance=%.2f",
-                            tracking, controller.getState(), pose.getX(DistanceUnit.METER),
+                            tracking || fieldHeading.isSelected(), controller.getState(), pose.getX(DistanceUnit.METER),
                             pose.getY(DistanceUnit.METER), pose.getHeading(AngleUnit.DEGREES),
                             fieldTargetDegrees, turretAngleDegrees(), power, odo.getDeviceStatus(),
-                            track, zero, gamepad1.a, gamepad1.x,
-                            gamepad1.y, gamepad1.b, gamepad1.left_bumper, gamepad1.right_bumper,
+                            track, zero, a, x, y, b, leftBumper, rightBumper,
                             settings.p, settings.i, settings.d, settings.f,
                             settings.minPower, settings.maxPower, settings.angleToleranceDegrees);
                     lastTrackingLogTime = now;
@@ -260,6 +276,44 @@ public class TurretAimTest extends LinearOpMode {
         zeroEncoderTicks = rawEncoderTicks;
         straightZeroEstablished = true;
         tracking = false;
+        fieldHeading.clear();
+    }
+
+    /** Preset field bearings are clockwise-positive, relative to the initial forward direction. */
+    static final class FieldHeadingSelection {
+        private boolean previousX, previousY, previousB;
+        private double degrees = Double.NaN;
+
+        void onStart(boolean x, boolean y, boolean b) {
+            previousX = x;
+            previousY = y;
+            previousB = b;
+        }
+
+        boolean update(boolean x, boolean y, boolean b) {
+            boolean xPressed = x && !previousX;
+            boolean yPressed = y && !previousY;
+            boolean bPressed = b && !previousB;
+            onStart(x, y, b);
+            if (!xPressed && !yPressed && !bPressed) return false;
+            degrees = yPressed ? 0.0 : xPressed ? 90.0 : -90.0;
+            return true;
+        }
+
+        void clear() {
+            degrees = Double.NaN;
+        }
+
+        boolean isSelected() {
+            return Double.isFinite(degrees);
+        }
+
+        double robotTargetDegrees(double headingDegrees) {
+            // Pinpoint heading is CCW-positive; the turret encoder is CW-positive.
+            // Add chassis heading to hold a fixed CW field bearing, then wrap to travel limits.
+            double target = degrees + headingDegrees;
+            return ((target + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        }
     }
 
     private JackbotsTeleOp.TurretTarget fieldTarget(Pose2D pose) {
@@ -272,16 +326,19 @@ public class TurretAimTest extends LinearOpMode {
     private void addTelemetry(Pose2D pose, String state, double power, double velocity, double target) {
         telemetry.addLine("Left stick: field-relative drive | Right stick X: turn");
         telemetry.addLine("LB: turret + | RB: turret - | Both: stop/clear fault");
-        telemetry.addLine("Absolute targets: X +90 | Y 0 | B -90 | Release/re-press any command to retry a fault");
+        telemetry.addLine("Hold field direction: X +90 | Y 0 | B -90 (clockwise from initial forward)");
+        telemetry.addLine("Release/re-press a preset to retry a fault. LB/RB cancel the field hold.");
         telemetry.addLine("D-pad Down: set straight-ahead zero | D-pad Up: toggle field tracking");
         telemetry.addLine("A: cancel tracking and reset local X/Y | P/I/D/F in Panels");
         telemetry.addLine("Field goals, turret offset and starting pose match JackbotsTeleOp.");
         telemetry.addData("Starting field pose applied", startingPose.isInitialized());
-        telemetry.addData("Tracking requested", tracking);
+        telemetry.addData("Tracking requested", tracking || fieldHeading.isSelected());
+        telemetry.addData("Aim mode", fieldHeading.isSelected() ? "Field direction" : tracking ? "Field goal" : "Manual / idle");
+        telemetry.addData("Selected field direction (CW degrees)", fieldHeading.degrees);
         telemetry.addData("Turret state", state);
         telemetry.addData("Turret power (both servos)", "%.3f", power);
         telemetry.addData("Odometry status", odo.getDeviceStatus());
-        telemetry.addData("Field target angle (clockwise degrees)", "%.2f", fieldTargetDegrees);
+        telemetry.addData("Required turret angle (robot-relative CW degrees)", "%.2f", fieldTargetDegrees);
         telemetry.addData("Field aiming error (degrees)", "%.2f", fieldTargetDegrees - turretAngleDegrees());
         telemetry.addData("Distance (m) X", "%.3f", pose.getX(DistanceUnit.METER));
         telemetry.addData("Distance (m) Y", "%.3f", pose.getY(DistanceUnit.METER));
